@@ -1,0 +1,43 @@
+body {
+    background: #f0f4c3;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    text-align: center;
+    margin: 0;
+    padding: 2em;
+}
+h1 {
+    color: #388e3c;
+    margin-bottom: 1em;
+}
+#word {
+    font-size: 2em;
+    letter-spacing: 0.5em;
+    margin: 1em 0;
+}
+#wrong-letters {
+    color: #d32f2f;
+    margin: 1em 0;
+    font-size: 1.2em;
+}
+#hangman-drawing {
+    font-size: 2em;
+    min-height: 2em;
+    margin-bottom: 1em;
+}
+#message {
+    font-size: 1.2em;
+    margin: 1em 0;
+    color: #1976d2;
+}
+#restart-btn {
+    padding: 0.5em 1.5em;
+    font-size: 1em;
+    background: #388e3c;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+#restart-btn:hover {
+    background: #2e7031;
+}
