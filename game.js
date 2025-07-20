@@ -4,6 +4,7 @@ let wrongLetters = [];
 const maxWrong = 6;
 
 function loadWord(callback) {
+    restartBtn.style.display = 'none';
     fetch('/api/random_word')
         .then(response => response.json())
         .then(data => {
@@ -58,11 +59,17 @@ function showMessage(msg, color='#1976d2') {
 function checkGameStatus() {
     if (wordDiv.textContent.replace(/ /g, '') === selectedWord) {
         showMessage('Congratulations! You won! 🎉', '#388e3c');
+       
+        const winAudio = document.getElementById('win-sound');
+        if (winAudio) winAudio.play(); // Play win sound
         restartBtn.style.display = 'inline-block';
         return true;
     }
     if (wrongLetters.length >= maxWrong) {
         showMessage('Game Over! The word was: ' + selectedWord, '#d32f2f');
+        
+        const loseAudio = document.getElementById('lose-sound');
+        if (loseAudio) loseAudio.play(); // Play lose sound
         restartBtn.style.display = 'inline-block';
         return true;
     }
@@ -141,12 +148,14 @@ document.addEventListener('keydown', (e) => {
             correctLetters.push(letter);
             updateDisplay();
             checkGameStatus();
+            document.getElementById('correct-sound').play();
         }
     } else {
         if (!wrongLetters.includes(letter)) {
             wrongLetters.push(letter);
             updateDisplay();
             checkGameStatus();
+            document.getElementById('wrong-sound').play();
         }
     }
 });
