@@ -38,7 +38,8 @@ A classic Hangman word guessing game built with HTML, CSS, JavaScript, and a Pyt
 1. Start the Flask server:
 
    ```bash
-   python server.py
+   python -m venv .venv
+   source .venv/bin/activate
    ```
 
 2. Open your browser and go to `http://localhost:5000`.
