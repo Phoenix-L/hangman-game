@@ -38,7 +38,30 @@ A classic Hangman word guessing game built with HTML, CSS, JavaScript, and a Pyt
 1. Start the Flask server:
 
    ```bash
-   python server.py
+   python -m venv .venv
+   source .venv/bin/activate
+   ```
+
+2. Install dependencies:
+
+   ```bash
+   python -m pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+
+3. Initialize and seed SQLite database:
+
+   ```bash
+   python scripts/init_db.py
+   ```
+
+## Run the application
+
+1. Start the Flask server:
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
    ```
 
 2. Open your browser and go to `http://localhost:5000`.
@@ -146,8 +169,3 @@ Guest mode behavior:
 
 - Swap scoring logic in `engine/word_selector.py` for alternate models.
 - Tune `recent_games_limit` and interval growth/reset behavior without changing API contracts.
-
-
-Seeding vocabulary data
------------------------
-python scripts/seed_words.py

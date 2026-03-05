@@ -1,0 +1,14 @@
+school
+classroom
+teacher
+student
+desk
+ruler
+eraser
+crayon
+paper
+notebook
+schoolbag
+book
+pen
+pencil
