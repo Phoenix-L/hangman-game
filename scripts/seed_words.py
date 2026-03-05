@@ -9,19 +9,13 @@ if str(ROOT) not in sys.path:
 from db import DEFAULT_DB_PATH, get_connection, init_db
 
 
-def _resolve_word_files(data_dir: Path) -> tuple[list[Path], Path]:
-    files = sorted(data_dir.glob('*.txt'))
-    if files:
-        return files, data_dir
+def _resolve_word_files(data_dir: Path) -> list[Path]:
+    base_files = sorted(data_dir.glob('*.txt'))
+    nested_files = sorted((data_dir / 'words').glob('*.txt'))
 
-    # Backward-compatible fallback for existing repository layout.
-    fallback_dir = data_dir / 'words'
-    fallback_files = sorted(fallback_dir.glob('*.txt'))
-    if fallback_files:
-        print(f"No files found in {data_dir}/. Falling back to {fallback_dir}/")
-        return fallback_files, fallback_dir
-
-    return [], data_dir
+    # Deduplicate while preserving deterministic ordering.
+    all_files = [*base_files, *nested_files]
+    return sorted({file.resolve(): file for file in all_files}.values(), key=lambda p: str(p))
 
 
 def seed_words(db_path: str, data_dir: str = 'data') -> tuple[int, int]:
@@ -29,9 +23,9 @@ def seed_words(db_path: str, data_dir: str = 'data') -> tuple[int, int]:
     if not data_path.exists() or not data_path.is_dir():
         raise FileNotFoundError(f"Data directory not found: {data_path}")
 
-    files, source_dir = _resolve_word_files(data_path)
+    files = _resolve_word_files(data_path)
     if not files:
-        raise FileNotFoundError(f"No .txt files found in {source_dir}")
+        raise FileNotFoundError(f"No .txt files found in {data_path}/ or {data_path / 'words'}/")
 
     init_db(db_path)
     conn = get_connection(db_path)
