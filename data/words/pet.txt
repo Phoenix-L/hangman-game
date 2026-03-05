@@ -1,0 +1,10 @@
+adventure
+bicycle
+country
+dolphin
+festival
+garden
+holiday
+journey
+mountain
+picture

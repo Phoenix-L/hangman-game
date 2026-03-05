@@ -1,0 +1,10 @@
+apple
+book
+chair
+door
+friend
+house
+music
+river
+school
+window
