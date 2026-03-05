@@ -9,6 +9,7 @@ A classic Hangman word guessing game built with HTML, CSS, JavaScript, and a Pyt
 - Visual hangman drawing
 - Score tracking
 - Web interface with sound effects
+- SQLite schema + seed loader for themes and words
 
 ## Setup
 
@@ -26,12 +27,19 @@ A classic Hangman word guessing game built with HTML, CSS, JavaScript, and a Pyt
    pip install -r requirements.txt
    ```
 
+3. Initialize and seed SQLite database:
+
+   ```bash
+   python scripts/init_db.py
+   ```
+
 ## Run the application
 
 1. Start the Flask server:
 
    ```bash
-   python server.py
+   python -m venv .venv
+   source .venv/bin/activate
    ```
 
 2. Open your browser and go to `http://localhost:5000`.
@@ -41,6 +49,45 @@ A classic Hangman word guessing game built with HTML, CSS, JavaScript, and a Pyt
 ```bash
 pytest -q
 ```
+
+## API endpoints
+
+- `GET /api/random_word` - existing random word endpoint used by the game.
+- `GET /api/themes` - returns seeded themes and word counts from SQLite.
+
+
+## Auth endpoints (MVP)
+
+- `POST /api/auth/signup` with JSON `{ "username": "...", "password": "..." }`
+- `POST /api/auth/login` with JSON `{ "username": "...", "password": "..." }`
+- `GET /api/me` returns guest/user session info
+- `POST /api/leaderboard_entries` requires login (guests receive `401`)
+
+## Manual auth test steps
+
+1. Start server: `python server.py`
+2. Sign up:
+   ```bash
+   curl -i -X POST http://localhost:5000/api/auth/signup \
+     -H "Content-Type: application/json" \
+     -d '{"username":"demo_user","password":"secret123"}'
+   ```
+3. Login:
+   ```bash
+   curl -i -X POST http://localhost:5000/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"username":"demo_user","password":"secret123"}'
+   ```
+4. Verify current session user:
+   ```bash
+   curl -i http://localhost:5000/api/me
+   ```
+5. Confirm guest restriction on leaderboard:
+   ```bash
+   curl -i -X POST http://localhost:5000/api/leaderboard_entries \
+     -H "Content-Type: application/json" \
+     -d '{"score":10}'
+   ```
 
 ## How to Play
 
@@ -52,14 +99,17 @@ pytest -q
 
 ```text
 hangman-game/
-├── AGENTS.md          # Instructions for Codex agents
-├── index.html         # Main HTML file
-├── style.css          # Styling
-├── game.js            # Game logic
-├── server.py          # Flask backend
-├── requirements.txt   # Python dependencies
-├── tests/             # Pytest test files
-├── word/              # Word lists
-├── assets/            # Sounds
-└── README.md          # Project docs
+├── AGENTS.md            # Instructions for Codex agents
+├── db.py                # SQLite schema + seed/query utilities
+├── scripts/init_db.py   # DB initialization entrypoint
+├── data/words/          # Seed word lists grouped by theme
+├── index.html           # Main HTML file
+├── style.css            # Styling
+├── game.js              # Game logic
+├── server.py            # Flask backend
+├── requirements.txt     # Python dependencies
+├── tests/               # Pytest test files
+├── word/                # Legacy word lists used by current gameplay
+├── assets/              # Sounds
+└── README.md            # Project docs
 ```

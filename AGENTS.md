@@ -12,11 +12,15 @@
    python -m pip install --upgrade pip
    pip install -r requirements.txt
    ```
-3. Run the web server:
+3. Initialize and seed SQLite database:
+   ```bash
+   python scripts/init_db.py
+   ```
+4. Run the web server:
    ```bash
    python server.py
    ```
-4. Open the app at `http://localhost:5000`.
+5. Open the app at `http://localhost:5000`.
 
 ## Test commands
 
@@ -30,3 +34,11 @@ pytest -q
 
 - Do not change gameplay logic unless explicitly requested.
 - Keep backend changes minimal and focused on server/runtime reliability.
+
+
+## Auth endpoints (MVP)
+
+- `POST /api/auth/signup` for account creation.
+- `POST /api/auth/login` for session login.
+- `GET /api/me` for guest/user session info.
+- Guests can play and request words, but cannot post leaderboard entries (`POST /api/leaderboard_entries` returns `401`).
