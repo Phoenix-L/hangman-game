@@ -46,12 +46,17 @@ CREATE TABLE IF NOT EXISTS games (
 );
 
 CREATE TABLE IF NOT EXISTS word_progress (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    game_id INTEGER NOT NULL,
-    guessed_letter TEXT NOT NULL,
-    was_correct INTEGER NOT NULL CHECK(was_correct IN (0, 1)),
-    guessed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(game_id) REFERENCES games(id) ON DELETE CASCADE
+    user_id INTEGER NOT NULL,
+    word_id INTEGER NOT NULL,
+    times_seen INTEGER NOT NULL DEFAULT 0,
+    times_correct INTEGER NOT NULL DEFAULT 0,
+    times_wrong INTEGER NOT NULL DEFAULT 0,
+    last_seen_at TEXT,
+    interval_days INTEGER NOT NULL DEFAULT 1,
+    next_review_at TEXT,
+    PRIMARY KEY (user_id, word_id),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS leaderboard_entries (
@@ -80,11 +85,39 @@ def _ensure_users_password_hash_column(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
 
 
+def _migrate_legacy_word_progress(conn: sqlite3.Connection) -> None:
+    columns = conn.execute("PRAGMA table_info(word_progress)").fetchall()
+    if not columns:
+        return
+    names = {col[1] for col in columns}
+    legacy_columns = {"game_id", "guessed_letter", "was_correct", "guessed_at"}
+    if legacy_columns.intersection(names):
+        conn.execute("DROP TABLE IF EXISTS word_progress")
+        conn.execute(
+            """
+            CREATE TABLE word_progress (
+                user_id INTEGER NOT NULL,
+                word_id INTEGER NOT NULL,
+                times_seen INTEGER NOT NULL DEFAULT 0,
+                times_correct INTEGER NOT NULL DEFAULT 0,
+                times_wrong INTEGER NOT NULL DEFAULT 0,
+                last_seen_at TEXT,
+                interval_days INTEGER NOT NULL DEFAULT 1,
+                next_review_at TEXT,
+                PRIMARY KEY (user_id, word_id),
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+
 def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
     conn = get_connection(db_path)
     try:
         conn.executescript(SCHEMA_SQL)
         _ensure_users_password_hash_column(conn)
+        _migrate_legacy_word_progress(conn)
         conn.commit()
     finally:
         conn.close()

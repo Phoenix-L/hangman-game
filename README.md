@@ -42,6 +42,28 @@ A classic Hangman word guessing game built with HTML, CSS, JavaScript, and a Pyt
    source .venv/bin/activate
    ```
 
+2. Install dependencies:
+
+   ```bash
+   python -m pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+
+3. Initialize and seed SQLite database:
+
+   ```bash
+   python scripts/init_db.py
+   ```
+
+## Run the application
+
+1. Start the Flask server:
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   ```
+
 2. Open your browser and go to `http://localhost:5000`.
 
 ## Run tests
@@ -113,3 +135,37 @@ hangman-game/
 ├── assets/              # Sounds
 └── README.md            # Project docs
 ```
+
+
+## Word Selection Engine v1
+
+The backend now includes `engine/word_selector.py` with the interface:
+
+- `select_next_word(user_id, theme_id)` (implemented as `select_next_word(conn, user_id, theme_id, ...)`)
+
+Selection order for authenticated users:
+
+1. due review words (`next_review_at <= now`)
+2. high-mistake words (`times_wrong` descending)
+3. unseen/new words
+4. fallback random word in theme
+
+Recent history is considered via the latest games and recently used words are avoided when possible.
+
+Guest mode behavior:
+
+- Guests use random selection within the requested theme (`guest_random` reason).
+- Guests still cannot submit leaderboard entries.
+
+### New API endpoint
+
+- `GET /api/word/next?theme=<theme_id>`
+  - Auth user: history/spaced-repetition aware selection
+  - Guest: random in theme
+- `POST /api/word/progress` (auth only) with `{ "word_id": <int>, "was_correct": <bool> }`
+  - updates `times_seen`, `times_correct`, `times_wrong`, `last_seen_at`, `interval_days`, `next_review_at`
+
+### Extension points
+
+- Swap scoring logic in `engine/word_selector.py` for alternate models.
+- Tune `recent_games_limit` and interval growth/reset behavior without changing API contracts.

@@ -42,3 +42,11 @@ pytest -q
 - `POST /api/auth/login` for session login.
 - `GET /api/me` for guest/user session info.
 - Guests can play and request words, but cannot post leaderboard entries (`POST /api/leaderboard_entries` returns `401`).
+
+
+## Word selection engine notes
+
+- Use `GET /api/word/next?theme=<id>` for next-word selection.
+- For authenticated users, selection is due-review first, then high-mistake, then new words.
+- For guests, selection is random within theme.
+- Use `POST /api/word/progress` to update spaced-repetition fields after each outcome.
