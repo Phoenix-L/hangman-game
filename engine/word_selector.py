@@ -37,6 +37,22 @@ def _recent_word_ids(conn: sqlite3.Connection, user_id: int, limit: int) -> list
     return [int(row["word_id"]) for row in rows]
 
 
+def _mastered_today_word_ids(conn: sqlite3.Connection, user_id: int, now: datetime | None = None) -> list[int]:
+    """Return word_ids the user has already mastered today (completed game with wrong_guesses < 3)."""
+    now = now or datetime.utcnow()
+    today = now.strftime("%Y-%m-%d")
+    rows = conn.execute(
+        """
+        SELECT DISTINCT word_id
+        FROM games
+        WHERE user_id = ? AND ended_at IS NOT NULL AND date(ended_at) = date(?)
+          AND wrong_guesses < 3 AND word_id IS NOT NULL
+        """,
+        (user_id, today),
+    ).fetchall()
+    return [int(row["word_id"]) for row in rows]
+
+
 def _fetch_candidates(conn: sqlite3.Connection, theme_id: int, excluded_word_ids: list[int]) -> list[sqlite3.Row]:
     if excluded_word_ids:
         placeholders = ','.join('?' for _ in excluded_word_ids)
@@ -111,20 +127,22 @@ def select_next_word(
     now_text = _iso_now(now)
 
     recent_ids = _recent_word_ids(conn, user_id, recent_games_limit)
+    mastered_today_ids = _mastered_today_word_ids(conn, user_id, now)
+    excluded_word_ids = list(dict.fromkeys(recent_ids + mastered_today_ids))
 
-    due = _pick_due(conn, user_id, theme_id, recent_ids, now_text)
+    due = _pick_due(conn, user_id, theme_id, excluded_word_ids, now_text)
     if due:
         return SelectionResult(word=dict(due), reason='due_review')
 
-    missed = _pick_missed(conn, user_id, theme_id, recent_ids)
+    missed = _pick_missed(conn, user_id, theme_id, excluded_word_ids)
     if missed:
         return SelectionResult(word=dict(missed), reason='high_mistake')
 
-    new_word = _pick_new(conn, user_id, theme_id, recent_ids, rng)
+    new_word = _pick_new(conn, user_id, theme_id, excluded_word_ids, rng)
     if new_word:
         return SelectionResult(word=dict(new_word), reason='new_word')
 
-    fallback_candidates = _fetch_candidates(conn, theme_id, [])
+    fallback_candidates = _fetch_candidates(conn, theme_id, excluded_word_ids)
     if not fallback_candidates:
         return SelectionResult(word=None, reason='no_words')
     picked = fallback_candidates[rng.randrange(len(fallback_candidates))]

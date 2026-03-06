@@ -97,11 +97,14 @@ def test_progress_summary_returns_expected_metrics(auth_client_with_progress):
     assert payload['accuracy_7d'] == pytest.approx(0.7272, rel=1e-3)
     assert payload['streak_days'] >= 1
 
-    assert payload['mastery_rule']['times_correct_gte'] == 3
-    assert payload['mastery_rule']['interval_days_gte'] == 7
+    assert payload['mastery_rule']['wrong_guesses_lt'] == 3
 
     themes = {row['theme_name']: row for row in payload['themes']}
     assert themes['KET']['words_seen'] == 2
     assert themes['KET']['words_mastered'] == 1
+    assert themes['KET']['accuracy_7d'] is not None
+    assert themes['KET']['accuracy_7d'] == pytest.approx(5 / 6, rel=1e-3)  # one game: 5 correct, 1 wrong
     assert themes['PET']['words_seen'] == 1
     assert themes['PET']['words_mastered'] == 1
+    assert themes['PET']['accuracy_7d'] is not None
+    assert themes['PET']['accuracy_7d'] == pytest.approx(3 / 5, rel=1e-3)  # one game: 3 correct, 2 wrong

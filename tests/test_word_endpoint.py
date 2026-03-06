@@ -39,6 +39,7 @@ def test_get_word_next_guest_mode(client_with_seeded_db):
     payload = response.get_json()
     assert payload['reason'] == 'guest_random'
     assert payload['word']['theme_id'] == theme_id
+    assert payload['theme'] == 'KET'
 
 
 def test_get_word_next_authenticated_uses_engine(client_with_seeded_db):
@@ -57,6 +58,7 @@ def test_get_word_next_authenticated_uses_engine(client_with_seeded_db):
     payload = response.get_json()
     assert payload['reason'] in {'new_word', 'fallback_random'}
     assert payload['word']['theme_id'] == theme_id
+    assert payload['theme'] == 'KET'
 
 
 def test_get_word_next_requires_theme_query(client_with_seeded_db):
@@ -64,3 +66,18 @@ def test_get_word_next_requires_theme_query(client_with_seeded_db):
 
     response = client.get('/api/word/next')
     assert response.status_code == 400
+
+
+def test_random_word_returns_word_and_theme(client_with_seeded_db):
+    """GET /api/random_word returns both word and theme for theme awareness."""
+    client, _ = client_with_seeded_db
+
+    response = client.get('/api/random_word')
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert 'word' in payload
+    assert 'theme' in payload
+    assert isinstance(payload['word'], str)
+    assert isinstance(payload['theme'], str)
+    assert payload['word'] in ('cat', 'dog')
+    assert payload['theme'] == 'KET'
