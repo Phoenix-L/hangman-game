@@ -81,6 +81,13 @@ h2, h3 {
     color: #fff;
 }
 
+.theme-hint {
+    font-size: 0.95em;
+    color: #2e7031;
+    margin-bottom: 0.5em;
+    min-height: 1.2em;
+}
+
 #word {
     font-size: 2em;
     letter-spacing: 0.5em;

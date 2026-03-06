@@ -7,12 +7,15 @@ from db import (
     create_leaderboard_entry,
     create_user,
     get_connection,
+    get_theme_name_by_id,
     get_user_by_id,
     get_user_by_username,
     get_progress_summary,
+    get_random_word,
     initialize_and_seed,
     list_global_leaderboard,
     list_themes,
+    theme_display_name,
 )
 from engine.word_selector import select_guest_word, select_next_word, update_word_progress
 
@@ -52,18 +55,16 @@ def serve_static(path):
 
 @app.route('/api/random_word')
 def random_word():
-    conn = get_connection(DB_PATH)
-    try:
-        row = conn.execute(
-            "SELECT value FROM words ORDER BY RANDOM() LIMIT 1"
-        ).fetchone()
-    finally:
-        conn.close()
+    result = get_random_word(DB_PATH)
+    if not result:
+        return jsonify({'error': 'No words found in database'}), 404
 
-    if not row:
-        return jsonify({'error': 'No words found'}), 404
-
-    response = jsonify({'word': row['value']})
+    theme_name = result.get('theme') or 'Vocabulary'
+    response = jsonify({
+        'word': result['value'],
+        'theme': theme_name,
+        'theme_display': theme_display_name(theme_name),
+    })
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
     return response
@@ -97,7 +98,13 @@ def get_next_word():
         if not selection.word:
             return jsonify({'error': 'No words found for theme'}), 404
 
-        return jsonify({'word': selection.word, 'reason': selection.reason})
+        theme_name = get_theme_name_by_id(DB_PATH, selection.word['theme_id']) or 'Vocabulary'
+        return jsonify({
+            'word': selection.word,
+            'theme': theme_name,
+            'theme_display': theme_display_name(theme_name),
+            'reason': selection.reason,
+        })
     finally:
         conn.close()
 

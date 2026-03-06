@@ -3,7 +3,9 @@ from datetime import date, timedelta
 from pathlib import Path
 
 DEFAULT_DB_PATH = "hangman.db"
-DEFAULT_WORD_DATA_DIR = "data"
+# By default, seed from top-level txt files in data/.
+# Legacy sources under word/ or data/words/ are intentionally ignored.
+DEFAULT_WORD_DIRS = ("data",)
 
 
 SCHEMA_SQL = """
@@ -146,15 +148,35 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
         conn.close()
 
 
-def _collect_word_files(data_dir: str = DEFAULT_WORD_DATA_DIR) -> list[Path]:
-    path = Path(data_dir)
-    if not path.exists() or not path.is_dir():
-        return []
-    return sorted(path.glob("*.txt"))
+def _collect_word_files(source_dirs: Iterable[str] | None = None) -> list[Path]:
+    """
+    Collect word list files from the configured directories.
+
+    Only immediate *.txt files in each directory are used. This intentionally
+    ignores legacy nested locations like data/words/ and word/.
+    """
+    dirs = source_dirs or DEFAULT_WORD_DIRS
+    files: list[Path] = []
+    for directory in dirs:
+        path = Path(directory)
+        if not path.exists() or not path.is_dir():
+            continue
+        # Only top-level txt files, no recursion into subdirectories.
+        files.extend(sorted(path.glob("*.txt")))
+    return files
 
 
-def seed_words_from_files(db_path: str = DEFAULT_DB_PATH, data_dir: str = DEFAULT_WORD_DATA_DIR) -> int:
-    files = _collect_word_files(data_dir)
+def _theme_name_from_file_path(file_path: Path) -> str:
+    """Derive theme name from vocabulary file name (e.g. ket_animals.txt -> KET_ANIMALS)."""
+    return file_path.stem.upper()
+
+
+def seed_words_from_files(db_path: str = DEFAULT_DB_PATH, source_dirs: Iterable[str] | None = None) -> int:
+    """
+    Seed themes and words from data/*.txt. Each file defines one theme (name = file stem).
+    Every word from that file is bound to that theme in the DB.
+    """
+    files = _collect_word_files(source_dirs)
     if not files:
         return 0
 
@@ -162,7 +184,7 @@ def seed_words_from_files(db_path: str = DEFAULT_DB_PATH, data_dir: str = DEFAUL
     inserted_words = 0
     try:
         for file_path in files:
-            theme_name = file_path.stem
+            theme_name = _theme_name_from_file_path(file_path)
             conn.execute(
                 "INSERT OR IGNORE INTO themes (name, description) VALUES (?, ?)",
                 (theme_name, f"Seeded from {file_path}"),
@@ -191,6 +213,24 @@ def seed_words_from_files(db_path: str = DEFAULT_DB_PATH, data_dir: str = DEFAUL
         conn.close()
 
 
+def clear_themes_and_words(db_path: str = DEFAULT_DB_PATH) -> None:
+    """
+    Remove all themes and words and dependent gameplay data so that the
+    vocabulary can be reseeded from the current data/*.txt files.
+    """
+    conn = get_connection(db_path)
+    try:
+        # Dependent tables first because of foreign keys.
+        conn.execute("DELETE FROM word_progress")
+        conn.execute("DELETE FROM leaderboard_entries")
+        conn.execute("DELETE FROM games")
+        conn.execute("DELETE FROM words")
+        conn.execute("DELETE FROM themes")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def list_themes(db_path: str = DEFAULT_DB_PATH) -> list[dict]:
     conn = get_connection(db_path)
     try:
@@ -204,6 +244,47 @@ def list_themes(db_path: str = DEFAULT_DB_PATH) -> list[dict]:
             """
         ).fetchall()
         return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_theme_name_by_id(db_path: str, theme_id: int) -> str | None:
+    """Return the theme name for the given theme id, or None if not found."""
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT name FROM themes WHERE id = ?",
+            (theme_id,),
+        ).fetchone()
+        return row["name"] if row else None
+    finally:
+        conn.close()
+
+
+def theme_display_name(theme_name: str) -> str:
+    """Return a short display label (e.g. KET_ANIMALS -> Animals)."""
+    if not theme_name:
+        return "Vocabulary"
+    parts = theme_name.strip().split("_")
+    return parts[-1].title() if parts else theme_name
+
+
+def get_random_word(db_path: str = DEFAULT_DB_PATH) -> dict[str, str] | None:
+    """
+    Return a random word with its theme name, or None if there are no words.
+    Returns dict with keys: value, theme (themes.name).
+    """
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT w.value, t.name AS theme
+            FROM words w
+            JOIN themes t ON t.id = w.theme_id
+            ORDER BY RANDOM() LIMIT 1
+            """,
+        ).fetchone()
+        return dict(row) if row else None
     finally:
         conn.close()
 
@@ -299,19 +380,23 @@ def get_progress_summary(db_path: str, user_id: int) -> dict:
     """Return progress summary for the dashboard: words_seen, words_mastered, accuracy_7d, streak_days, themes."""
     conn = get_connection(db_path)
     try:
-        # Words seen and mastered (mastery: times_correct >= 3 and interval_days >= 7)
+        # Words seen: distinct words in word_progress
         row = conn.execute(
-            """
-            SELECT
-                COUNT(DISTINCT word_id) AS words_seen,
-                SUM(CASE WHEN times_correct >= 3 AND interval_days >= 7 THEN 1 ELSE 0 END) AS words_mastered
-            FROM word_progress
-            WHERE user_id = ?
-            """,
+            "SELECT COUNT(DISTINCT word_id) AS words_seen FROM word_progress WHERE user_id = ?",
             (user_id,),
         ).fetchone()
         words_seen = row["words_seen"] or 0
-        words_mastered = int(row["words_mastered"] or 0)
+
+        # Words mastered: completed a game with fewer than 3 wrong letters (0, 1, or 2)
+        mastered_row = conn.execute(
+            """
+            SELECT COUNT(DISTINCT word_id) AS words_mastered
+            FROM games
+            WHERE user_id = ? AND ended_at IS NOT NULL AND wrong_guesses < 3
+            """,
+            (user_id,),
+        ).fetchone()
+        words_mastered = int(mastered_row["words_mastered"] or 0)
 
         # Accuracy over last 7 days (completed games only)
         acc_row = conn.execute(
@@ -345,13 +430,19 @@ def get_progress_summary(db_path: str, user_id: int) -> dict:
                 streak_days += 1
                 d -= timedelta(days=1)
 
-        # Per-theme breakdown
+        # Per-theme breakdown: words_seen, words_mastered (wrong_guesses < 3), accuracy_7d
         theme_rows = conn.execute(
             """
             SELECT
+                t.id AS theme_id,
                 t.name AS theme_name,
                 COUNT(DISTINCT wp.word_id) AS words_seen,
-                SUM(CASE WHEN wp.times_correct >= 3 AND wp.interval_days >= 7 THEN 1 ELSE 0 END) AS words_mastered
+                (SELECT COUNT(DISTINCT g.word_id) FROM games g
+                 WHERE g.user_id = ? AND g.ended_at IS NOT NULL AND g.wrong_guesses < 3 AND g.theme_id = t.id) AS words_mastered,
+                (SELECT CASE WHEN SUM(g.correct_guesses) + SUM(g.wrong_guesses) > 0
+                    THEN SUM(g.correct_guesses) * 1.0 / (SUM(g.correct_guesses) + SUM(g.wrong_guesses)) ELSE NULL END
+                 FROM games g
+                 WHERE g.user_id = ? AND g.ended_at IS NOT NULL AND g.ended_at >= datetime('now', '-7 days') AND g.theme_id = t.id) AS accuracy_7d
             FROM word_progress wp
             JOIN words w ON w.id = wp.word_id
             JOIN themes t ON t.id = w.theme_id
@@ -359,29 +450,37 @@ def get_progress_summary(db_path: str, user_id: int) -> dict:
             GROUP BY t.id, t.name
             ORDER BY t.name
             """,
-            (user_id,),
+            (user_id, user_id, user_id),
         ).fetchall()
-        themes = [
-            {
+        themes = []
+        for row in theme_rows:
+            acc = row["accuracy_7d"]
+            themes.append({
                 "theme_name": row["theme_name"],
                 "words_seen": row["words_seen"],
                 "words_mastered": int(row["words_mastered"] or 0),
-            }
-            for row in theme_rows
-        ]
+                "accuracy_7d": round(acc, 4) if acc is not None else None,
+            })
 
         return {
             "words_seen": words_seen,
             "words_mastered": words_mastered,
             "accuracy_7d": round(accuracy_7d, 4),
             "streak_days": streak_days,
-            "mastery_rule": {"times_correct_gte": 3, "interval_days_gte": 7},
+            "mastery_rule": {"wrong_guesses_lt": 3},
             "themes": themes,
         }
     finally:
         conn.close()
 
 
-def initialize_and_seed(db_path: str = DEFAULT_DB_PATH, data_dir: str = DEFAULT_WORD_DATA_DIR) -> int:
+def initialize_and_seed(db_path: str = DEFAULT_DB_PATH, source_dirs: Iterable[str] | None = None) -> int:
+    """
+    Initialize schema and reseed vocabulary words from the current data files.
+
+    This clears themes/words and dependent gameplay tables so that legacy
+    word sources (e.g. word/ or data/words/) are removed from the database.
+    """
     init_db(db_path)
-    return seed_words_from_files(db_path=db_path, data_dir=data_dir)
+    clear_themes_and_words(db_path)
+    return seed_words_from_files(db_path=db_path, source_dirs=source_dirs)

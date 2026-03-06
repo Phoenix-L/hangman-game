@@ -1,6 +1,13 @@
 from pathlib import Path
 
-from db import init_db, list_themes, seed_words_from_files
+from db import (
+    clear_themes_and_words,
+    get_random_word,
+    get_theme_name_by_id,
+    init_db,
+    list_themes,
+    seed_words_from_files,
+)
 
 
 def test_init_db_creates_expected_tables(tmp_path):
@@ -54,3 +61,41 @@ def test_seed_loading_and_theme_queries(tmp_path):
 
     inserted_again = seed_words_from_files(str(db_path), data_dir=str(words_dir))
     assert inserted_again == 0
+
+
+def test_get_theme_name_by_id(tmp_path):
+    db_path = tmp_path / 'themes.db'
+    words_dir = tmp_path / 'words'
+    words_dir.mkdir()
+    (words_dir / 'ket.txt').write_text('cat\ndog\n', encoding='utf-8')
+
+    init_db(str(db_path))
+    seed_words_from_files(str(db_path), source_dirs=[str(words_dir)])
+
+    conn = __import__('sqlite3').connect(db_path)
+    theme_id = conn.execute("SELECT id FROM themes WHERE name='KET'").fetchone()[0]
+    conn.close()
+
+    assert get_theme_name_by_id(str(db_path), theme_id) == 'KET'
+    assert get_theme_name_by_id(str(db_path), 99999) is None
+
+
+def test_get_random_word_returns_value_and_theme(tmp_path):
+    db_path = tmp_path / 'rand.db'
+    words_dir = tmp_path / 'words'
+    words_dir.mkdir()
+    (words_dir / 'food.txt').write_text('apple\nbread\n', encoding='utf-8')
+
+    init_db(str(db_path))
+    seed_words_from_files(str(db_path), source_dirs=[str(words_dir)])
+
+    result = get_random_word(str(db_path))
+    assert result is not None
+    assert 'value' in result
+    assert 'theme' in result
+    assert result['value'] in ('apple', 'bread')
+    assert result['theme'] == 'FOOD'
+
+    # Empty DB returns None
+    clear_themes_and_words(str(db_path))
+    assert get_random_word(str(db_path)) is None

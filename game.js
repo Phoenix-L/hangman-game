@@ -6,6 +6,7 @@ const maxWrong = 6;
 // For progress/leaderboard: word and theme from /api/word/next
 let currentWordId = null;
 let currentThemeId = null;
+let currentThemeName = '';
 let gameStartTime = null;
 let defaultThemeId = 1;
 
@@ -13,6 +14,7 @@ const wordDiv = document.getElementById('word');
 const wrongDiv = document.getElementById('wrong-letters');
 const messageDiv = document.getElementById('message');
 const restartBtn = document.getElementById('restart-btn');
+const themeHintEl = document.getElementById('theme-hint');
 
 const canvas = document.getElementById('hangman-canvas');
 const ctx = canvas.getContext('2d');
@@ -34,6 +36,8 @@ function loadWord(callback) {
     restartBtn.style.display = 'none';
     currentWordId = null;
     currentThemeId = null;
+    currentThemeName = '';
+    if (themeHintEl) themeHintEl.textContent = '';
 
     const url = '/api/word/next?theme=' + defaultThemeId + '&_=' + Date.now();
     fetch(url, { credentials: 'same-origin' })
@@ -45,6 +49,7 @@ function loadWord(callback) {
                 selectedWord = wordText.toLowerCase();
                 currentWordId = wordObj.id != null ? wordObj.id : null;
                 currentThemeId = wordObj.theme_id != null ? wordObj.theme_id : null;
+                currentThemeName = (data.theme_display != null && data.theme_display !== '') ? data.theme_display : ((data.theme != null && data.theme !== '') ? data.theme : 'Vocabulary');
                 gameStartTime = Date.now();
                 correctLetters = [];
                 wrongLetters = [];
@@ -53,12 +58,13 @@ function loadWord(callback) {
                 }
                 callback();
             } else {
-                // Fallback to legacy random_word if word/next fails (e.g. no themes)
+                // Fallback to random_word if word/next fails (e.g. no themes)
                 fetch('/api/random_word?_=' + Date.now())
                     .then(r => r.json())
                     .then(fallback => {
                         if (fallback.word) {
                             selectedWord = fallback.word.toLowerCase();
+                            currentThemeName = (fallback.theme_display != null && fallback.theme_display !== '') ? fallback.theme_display : ((fallback.theme != null && fallback.theme !== '') ? fallback.theme : 'Vocabulary');
                             gameStartTime = Date.now();
                             correctLetters = [];
                             wrongLetters = [];
@@ -78,6 +84,7 @@ function loadWord(callback) {
                 .then(fallback => {
                     if (fallback.word) {
                         selectedWord = fallback.word.toLowerCase();
+                        currentThemeName = (fallback.theme_display != null && fallback.theme_display !== '') ? fallback.theme_display : ((fallback.theme != null && fallback.theme !== '') ? fallback.theme : 'Vocabulary');
                         gameStartTime = Date.now();
                         correctLetters = [];
                         wrongLetters = [];
@@ -102,6 +109,9 @@ function pickWord() {
 }
 
 function updateDisplay() {
+    if (themeHintEl) {
+        themeHintEl.textContent = currentThemeName ? 'Theme: ' + currentThemeName : '';
+    }
     wordDiv.textContent = selectedWord
         .split('')
         .map(letter => (correctLetters.includes(letter) ? letter : '_'))
