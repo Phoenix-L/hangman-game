@@ -37,12 +37,18 @@ CREATE TABLE IF NOT EXISTS games (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     word_id INTEGER,
+    theme_id INTEGER,
     status TEXT NOT NULL CHECK(status IN ('in_progress', 'won', 'lost')) DEFAULT 'in_progress',
     wrong_guesses INTEGER NOT NULL DEFAULT 0,
+    correct_guesses INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
+    accuracy REAL,
+    score INTEGER,
     started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     ended_at TEXT,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
-    FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE SET NULL
+    FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE SET NULL,
+    FOREIGN KEY(theme_id) REFERENCES themes(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS word_progress (
@@ -112,12 +118,29 @@ def _migrate_legacy_word_progress(conn: sqlite3.Connection) -> None:
         )
 
 
+def _ensure_games_columns(conn: sqlite3.Connection) -> None:
+    columns = conn.execute("PRAGMA table_info(games)").fetchall()
+    names = {col[1] for col in columns}
+
+    additions = [
+        ("theme_id", "INTEGER REFERENCES themes(id) ON DELETE SET NULL"),
+        ("correct_guesses", "INTEGER NOT NULL DEFAULT 0"),
+        ("duration_ms", "INTEGER"),
+        ("accuracy", "REAL"),
+        ("score", "INTEGER"),
+    ]
+    for column_name, column_type in additions:
+        if column_name not in names:
+            conn.execute(f"ALTER TABLE games ADD COLUMN {column_name} {column_type}")
+
+
 def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
     conn = get_connection(db_path)
     try:
         conn.executescript(SCHEMA_SQL)
         _ensure_users_password_hash_column(conn)
         _migrate_legacy_word_progress(conn)
+        _ensure_games_columns(conn)
         conn.commit()
     finally:
         conn.close()
@@ -237,6 +260,41 @@ def create_leaderboard_entry(db_path: str, user_id: int, score: int, game_id: in
         )
         conn.commit()
         return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
+def list_global_leaderboard(db_path: str, *, theme_id: int | None = None, limit: int = 50) -> list[dict]:
+    conn = get_connection(db_path)
+    try:
+        bounded_limit = max(1, min(50, int(limit)))
+
+        base = """
+            SELECT le.id,
+                   le.user_id,
+                   u.username,
+                   le.score,
+                   le.recorded_at,
+                   le.game_id,
+                   g.theme_id,
+                   g.word_id,
+                   g.duration_ms,
+                   g.correct_guesses,
+                   g.wrong_guesses,
+                   g.accuracy
+            FROM leaderboard_entries le
+            JOIN games g ON g.id = le.game_id
+            LEFT JOIN users u ON u.id = le.user_id
+        """
+        params: list[int] = []
+        if theme_id is not None:
+            base += " WHERE g.theme_id = ?"
+            params.append(theme_id)
+        base += " ORDER BY le.score DESC, le.recorded_at ASC, le.id ASC LIMIT ?"
+        params.append(bounded_limit)
+
+        rows = conn.execute(base, params).fetchall()
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 
