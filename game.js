@@ -12,6 +12,10 @@ function loadWord(callback) {
                 selectedWord = data.word.toLowerCase();
                 correctLetters = [];
                 wrongLetters = [];
+                // Clear any previous status message when starting a new game
+                if (messageDiv) {
+                    messageDiv.textContent = '';
+                }
                 callback();
             } else {
                 alert('Failed to load word: ' + (data.error || 'Unknown error'));
@@ -44,8 +48,12 @@ function updateDisplay() {
         .map(letter => (correctLetters.includes(letter) ? letter : '_'))
         .join(' ');
 
-    // Display wrong letters
-    wrongDiv.textContent = 'Wrong: ' + wrongLetters.join(' ');
+    // Display wrong letters only after at least one incorrect guess
+    if (wrongLetters.length > 0) {
+        wrongDiv.textContent = 'Wrong: ' + wrongLetters.join(' ');
+    } else {
+        wrongDiv.textContent = '';
+    }
 
     // Draw hangman with graphics
     drawHangman();
