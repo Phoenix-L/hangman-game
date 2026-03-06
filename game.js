@@ -3,6 +3,12 @@ let correctLetters = [];
 let wrongLetters = [];
 const maxWrong = 6;
 
+// For progress/leaderboard: word and theme from /api/word/next
+let currentWordId = null;
+let currentThemeId = null;
+let gameStartTime = null;
+let defaultThemeId = 1;
+
 const wordDiv = document.getElementById('word');
 const wrongDiv = document.getElementById('wrong-letters');
 const messageDiv = document.getElementById('message');
@@ -26,11 +32,20 @@ let latestProgressSummary = null;
 
 function loadWord(callback) {
     restartBtn.style.display = 'none';
-    fetch('/api/random_word')
+    currentWordId = null;
+    currentThemeId = null;
+
+    const url = '/api/word/next?theme=' + defaultThemeId + '&_=' + Date.now();
+    fetch(url, { credentials: 'same-origin' })
         .then(response => response.json())
         .then(data => {
-            if (data.word) {
-                selectedWord = data.word.toLowerCase();
+            const wordObj = data.word;
+            const wordText = wordObj && (wordObj.value || wordObj.word);
+            if (wordText) {
+                selectedWord = wordText.toLowerCase();
+                currentWordId = wordObj.id != null ? wordObj.id : null;
+                currentThemeId = wordObj.theme_id != null ? wordObj.theme_id : null;
+                gameStartTime = Date.now();
                 correctLetters = [];
                 wrongLetters = [];
                 if (messageDiv) {
@@ -38,12 +53,45 @@ function loadWord(callback) {
                 }
                 callback();
             } else {
-                alert('Failed to load word: ' + (data.error || 'Unknown error'));
+                // Fallback to legacy random_word if word/next fails (e.g. no themes)
+                fetch('/api/random_word?_=' + Date.now())
+                    .then(r => r.json())
+                    .then(fallback => {
+                        if (fallback.word) {
+                            selectedWord = fallback.word.toLowerCase();
+                            gameStartTime = Date.now();
+                            correctLetters = [];
+                            wrongLetters = [];
+                            if (messageDiv) messageDiv.textContent = '';
+                            callback();
+                        } else {
+                            alert('Failed to load word: ' + (data.error || fallback.error || 'Unknown error'));
+                        }
+                    })
+                    .catch(() => alert('Failed to load word: ' + (data.error || 'Unknown error')));
             }
         })
         .catch(err => {
-            alert('Failed to load word from server!');
-            console.error(err);
+            // Fallback to random_word if word/next fails
+            fetch('/api/random_word?_=' + Date.now())
+                .then(r => r.json())
+                .then(fallback => {
+                    if (fallback.word) {
+                        selectedWord = fallback.word.toLowerCase();
+                        gameStartTime = Date.now();
+                        correctLetters = [];
+                        wrongLetters = [];
+                        if (messageDiv) messageDiv.textContent = '';
+                        callback();
+                    } else {
+                            alert('Failed to load word from server!');
+                            console.error(err);
+                        }
+                })
+                .catch(() => {
+                    alert('Failed to load word from server!');
+                    console.error(err);
+                });
         });
 }
 
@@ -73,10 +121,27 @@ function showMessage(msg, color = '#1976d2') {
     messageDiv.style.color = color;
 }
 
+function submitGameResult(won) {
+    if (currentWordId == null || currentThemeId == null) return;
+    const duration_ms = gameStartTime ? Math.max(0, Date.now() - gameStartTime) : 0;
+    fetch('/api/game/result', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+            word_id: currentWordId,
+            theme_id: currentThemeId,
+            duration_ms: duration_ms,
+            guesses: { correct: correctLetters.length, wrong: wrongLetters.length },
+            won: won,
+        }),
+    }).catch(() => {});
+}
+
 function checkGameStatus() {
     if (wordDiv.textContent.replace(/ /g, '') === selectedWord) {
         showMessage('Congratulations! You won! 🎉', '#388e3c');
-
+        submitGameResult(true);
         const winAudio = document.getElementById('win-sound');
         if (winAudio) winAudio.play();
         restartBtn.style.display = 'inline-block';
@@ -84,7 +149,7 @@ function checkGameStatus() {
     }
     if (wrongLetters.length >= maxWrong) {
         showMessage('Game Over! The word was: ' + selectedWord, '#d32f2f');
-
+        submitGameResult(false);
         const loseAudio = document.getElementById('lose-sound');
         if (loseAudio) loseAudio.play();
         restartBtn.style.display = 'inline-block';
@@ -274,4 +339,162 @@ showGameBtn.addEventListener('click', showGameView);
 showProgressBtn.addEventListener('click', showProgressView);
 shareProgressBtn.addEventListener('click', shareProgressCard);
 
-loadWord(updateDisplay);
+// --- Auth UI ---
+const authGuest = document.getElementById('auth-guest');
+const authUser = document.getElementById('auth-user');
+const authUsername = document.getElementById('auth-username');
+const authForms = document.getElementById('auth-forms');
+const signupForm = document.getElementById('signup-form');
+const loginForm = document.getElementById('login-form');
+const showSignupBtn = document.getElementById('show-signup-btn');
+const showLoginBtn = document.getElementById('show-login-btn');
+const signupUsername = document.getElementById('signup-username');
+const signupPassword = document.getElementById('signup-password');
+const signupSubmitBtn = document.getElementById('signup-submit-btn');
+const signupMessage = document.getElementById('signup-message');
+const loginUsername = document.getElementById('login-username');
+const loginPassword = document.getElementById('login-password');
+const loginSubmitBtn = document.getElementById('login-submit-btn');
+const loginMessage = document.getElementById('login-message');
+const logoutBtn = document.getElementById('logout-btn');
+
+function showAuthGuest() {
+    authGuest.classList.remove('hidden');
+    authUser.classList.add('hidden');
+    authForms.classList.add('hidden');
+    signupForm.classList.add('hidden');
+    loginForm.classList.add('hidden');
+}
+
+function showAuthUser(username) {
+    authGuest.classList.add('hidden');
+    authUser.classList.remove('hidden');
+    authForms.classList.add('hidden');
+    authUsername.textContent = 'Logged in as ' + username;
+}
+
+function openSignup() {
+    loginForm.classList.add('hidden');
+    signupForm.classList.remove('hidden');
+    authForms.classList.remove('hidden');
+    signupMessage.textContent = '';
+}
+
+function openLogin() {
+    signupForm.classList.add('hidden');
+    loginForm.classList.remove('hidden');
+    authForms.classList.remove('hidden');
+    loginMessage.textContent = '';
+}
+
+function closeAuthForms() {
+    authForms.classList.add('hidden');
+    signupForm.classList.add('hidden');
+    loginForm.classList.add('hidden');
+}
+
+function refreshAuth() {
+    fetch('/api/me', { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.guest) {
+                showAuthGuest();
+            } else if (data.user && data.user.username) {
+                showAuthUser(data.user.username);
+            } else {
+                showAuthGuest();
+            }
+        })
+        .catch(() => showAuthGuest());
+}
+
+showSignupBtn.addEventListener('click', openSignup);
+showLoginBtn.addEventListener('click', openLogin);
+
+signupSubmitBtn.addEventListener('click', () => {
+    const username = (signupUsername.value || '').trim();
+    const password = signupPassword.value || '';
+    signupMessage.textContent = '';
+    signupMessage.classList.remove('error', 'success');
+    if (username.length < 3 || password.length < 6) {
+        signupMessage.textContent = 'Username at least 3 chars, password at least 6.';
+        signupMessage.classList.add('error');
+        return;
+    }
+    fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ username, password }),
+    })
+        .then(r => r.json().then(body => ({ status: r.status, body })))
+        .then(({ status, body }) => {
+            if (status === 201) {
+                signupMessage.textContent = 'Account created. You are logged in.';
+                signupMessage.classList.add('success');
+                closeAuthForms();
+                refreshAuth();
+            } else {
+                signupMessage.textContent = body.error || 'Sign up failed.';
+                signupMessage.classList.add('error');
+            }
+        })
+        .catch(() => {
+            signupMessage.textContent = 'Request failed.';
+            signupMessage.classList.add('error');
+        });
+});
+
+loginSubmitBtn.addEventListener('click', () => {
+    const username = (loginUsername.value || '').trim();
+    const password = loginPassword.value || '';
+    loginMessage.textContent = '';
+    loginMessage.classList.remove('error', 'success');
+    if (!username || !password) {
+        loginMessage.textContent = 'Enter username and password.';
+        loginMessage.classList.add('error');
+        return;
+    }
+    fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ username, password }),
+    })
+        .then(r => r.json().then(body => ({ status: r.status, body })))
+        .then(({ status, body }) => {
+            if (status === 200) {
+                loginMessage.textContent = 'Logged in.';
+                loginMessage.classList.add('success');
+                closeAuthForms();
+                refreshAuth();
+            } else {
+                loginMessage.textContent = body.error || 'Log in failed.';
+                loginMessage.classList.add('error');
+            }
+        })
+        .catch(() => {
+            loginMessage.textContent = 'Request failed.';
+            loginMessage.classList.add('error');
+        });
+});
+
+logoutBtn.addEventListener('click', () => {
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
+        .then(() => refreshAuth());
+});
+
+function startGame() {
+    fetch('/api/themes', { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.themes && data.themes.length > 0 && data.themes[0].id != null) {
+                defaultThemeId = data.themes[0].id;
+            }
+            loadWord(updateDisplay);
+        })
+        .catch(() => loadWord(updateDisplay));
+}
+
+refreshAuth();
+startGame();

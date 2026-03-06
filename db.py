@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -295,6 +296,93 @@ def list_global_leaderboard(db_path: str, *, theme_id: int | None = None, limit:
 
         rows = conn.execute(base, params).fetchall()
         return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_progress_summary(db_path: str, user_id: int) -> dict:
+    """Return progress summary for the dashboard: words_seen, words_mastered, accuracy_7d, streak_days, themes."""
+    conn = get_connection(db_path)
+    try:
+        # Words seen and mastered (mastery: times_correct >= 3 and interval_days >= 7)
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(DISTINCT word_id) AS words_seen,
+                SUM(CASE WHEN times_correct >= 3 AND interval_days >= 7 THEN 1 ELSE 0 END) AS words_mastered
+            FROM word_progress
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+        words_seen = row["words_seen"] or 0
+        words_mastered = int(row["words_mastered"] or 0)
+
+        # Accuracy over last 7 days (completed games only)
+        acc_row = conn.execute(
+            """
+            SELECT SUM(correct_guesses) AS total_correct, SUM(wrong_guesses) AS total_wrong
+            FROM games
+            WHERE user_id = ? AND ended_at IS NOT NULL AND ended_at >= datetime('now', '-7 days')
+            """,
+            (user_id,),
+        ).fetchone()
+        total_correct = acc_row["total_correct"] or 0
+        total_wrong = acc_row["total_wrong"] or 0
+        total_guesses = total_correct + total_wrong
+        accuracy_7d = (total_correct / total_guesses) if total_guesses > 0 else 0.0
+
+        # Streak: consecutive days with at least one completed game
+        date_rows = conn.execute(
+            """
+            SELECT DISTINCT date(ended_at) AS d
+            FROM games
+            WHERE user_id = ? AND ended_at IS NOT NULL
+            ORDER BY d DESC
+            """,
+            (user_id,),
+        ).fetchall()
+        game_dates = {date.fromisoformat(r["d"]) for r in date_rows}
+        streak_days = 0
+        if game_dates:
+            d = max(game_dates)
+            while d in game_dates:
+                streak_days += 1
+                d -= timedelta(days=1)
+
+        # Per-theme breakdown
+        theme_rows = conn.execute(
+            """
+            SELECT
+                t.name AS theme_name,
+                COUNT(DISTINCT wp.word_id) AS words_seen,
+                SUM(CASE WHEN wp.times_correct >= 3 AND wp.interval_days >= 7 THEN 1 ELSE 0 END) AS words_mastered
+            FROM word_progress wp
+            JOIN words w ON w.id = wp.word_id
+            JOIN themes t ON t.id = w.theme_id
+            WHERE wp.user_id = ?
+            GROUP BY t.id, t.name
+            ORDER BY t.name
+            """,
+            (user_id,),
+        ).fetchall()
+        themes = [
+            {
+                "theme_name": row["theme_name"],
+                "words_seen": row["words_seen"],
+                "words_mastered": int(row["words_mastered"] or 0),
+            }
+            for row in theme_rows
+        ]
+
+        return {
+            "words_seen": words_seen,
+            "words_mastered": words_mastered,
+            "accuracy_7d": round(accuracy_7d, 4),
+            "streak_days": streak_days,
+            "mastery_rule": {"times_correct_gte": 3, "interval_days_gte": 7},
+            "themes": themes,
+        }
     finally:
         conn.close()
 
