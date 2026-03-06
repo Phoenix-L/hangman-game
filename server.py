@@ -1,7 +1,6 @@
 from flask import Flask, jsonify, request, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 import os
-import random
 
 from db import (
     DEFAULT_DB_PATH,
@@ -20,7 +19,6 @@ from engine.word_selector import select_guest_word, select_next_word, update_wor
 app = Flask(__name__, static_folder='.', static_url_path='')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-only-change-me')
 
-WORD_DIR = 'word'
 DB_PATH = os.environ.get('HANGMAN_DB_PATH', DEFAULT_DB_PATH)
 
 initialize_and_seed(DB_PATH)
@@ -54,17 +52,18 @@ def serve_static(path):
 
 @app.route('/api/random_word')
 def random_word():
-    files = [f for f in os.listdir(WORD_DIR) if f.endswith('.txt')]
-    if not files:
-        return jsonify({'error': 'No word files found'}), 404
+    conn = get_connection(DB_PATH)
+    try:
+        row = conn.execute(
+            "SELECT value FROM words ORDER BY RANDOM() LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
 
-    chosen_file = random.choice(files)
-    with open(os.path.join(WORD_DIR, chosen_file), 'r', encoding='utf-8') as f:
-        words = [line.strip() for line in f if line.strip()]
-    if not words:
-        return jsonify({'error': 'No words found in file'}), 404
+    if not row:
+        return jsonify({'error': 'No words found'}), 404
 
-    response = jsonify({'word': random.choice(words)})
+    response = jsonify({'word': row['value']})
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
     return response

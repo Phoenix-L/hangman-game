@@ -17,7 +17,7 @@ def auth_client_with_progress(tmp_path, monkeypatch):
     (words_dir / 'pet.txt').write_text('planet\ntravel\n', encoding='utf-8')
 
     init_db(str(db_path))
-    seed_words_from_files(str(db_path), source_dirs=[str(words_dir)])
+    seed_words_from_files(str(db_path), data_dir=str(words_dir))
 
     monkeypatch.setattr(server, 'DB_PATH', str(db_path))
     server.app.config['TESTING'] = True
@@ -30,8 +30,8 @@ def auth_client_with_progress(tmp_path, monkeypatch):
 
         conn = get_connection(str(db_path))
         try:
-            ket_id = conn.execute("SELECT id FROM themes WHERE name='KET'").fetchone()['id']
-            pet_id = conn.execute("SELECT id FROM themes WHERE name='PET'").fetchone()['id']
+            ket_id = conn.execute("SELECT id FROM themes WHERE name='ket'").fetchone()['id']
+            pet_id = conn.execute("SELECT id FROM themes WHERE name='pet'").fetchone()['id']
             cat_id = conn.execute('SELECT id FROM words WHERE theme_id = ? ORDER BY id LIMIT 1', (ket_id,)).fetchone()['id']
             dog_id = conn.execute('SELECT id FROM words WHERE theme_id = ? ORDER BY id LIMIT 1 OFFSET 1', (ket_id,)).fetchone()['id']
             planet_id = conn.execute('SELECT id FROM words WHERE theme_id = ? ORDER BY id LIMIT 1', (pet_id,)).fetchone()['id']
@@ -101,7 +101,7 @@ def test_progress_summary_returns_expected_metrics(auth_client_with_progress):
     assert payload['mastery_rule']['interval_days_gte'] == 7
 
     themes = {row['theme_name']: row for row in payload['themes']}
-    assert themes['KET']['words_seen'] == 2
-    assert themes['KET']['words_mastered'] == 1
-    assert themes['PET']['words_seen'] == 1
-    assert themes['PET']['words_mastered'] == 1
+    assert themes['ket']['words_seen'] == 2
+    assert themes['ket']['words_mastered'] == 1
+    assert themes['pet']['words_seen'] == 1
+    assert themes['pet']['words_mastered'] == 1

@@ -66,6 +66,16 @@ A classic Hangman word guessing game built with HTML, CSS, JavaScript, and a Pyt
 
 2. Open your browser and go to `http://localhost:5000`.
 
+## Vocabulary workflow
+
+- Store vocabulary only in `data/*.txt` (one word per line, one theme per file).
+- Use the filename (without extension) as the theme identifier.
+- Load/update words in SQLite with:
+
+```bash
+python scripts/seed_words.py
+```
+
 ## Run tests
 
 ```bash
@@ -74,7 +84,7 @@ pytest -q
 
 ## API endpoints
 
-- `GET /api/random_word` - existing random word endpoint used by the game.
+- `GET /api/random_word` - random word from the SQLite `words` table.
 - `GET /api/themes` - returns seeded themes and word counts from SQLite.
 
 
@@ -126,14 +136,13 @@ hangman-game/
 ├── AGENTS.md            # Instructions for Codex agents
 ├── db.py                # SQLite schema + seed/query utilities
 ├── scripts/init_db.py   # DB initialization entrypoint
-├── data/words/          # Seed word lists grouped by theme
+├── data/                # Vocabulary files (*.txt), one theme per file
 ├── index.html           # Main HTML file
 ├── style.css            # Styling
 ├── game.js              # Game logic
 ├── server.py            # Flask backend
 ├── requirements.txt     # Python dependencies
 ├── tests/               # Pytest test files
-├── word/                # Legacy word lists used by current gameplay
 ├── assets/              # Sounds
 └── README.md            # Project docs
 ```
