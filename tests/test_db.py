@@ -40,17 +40,17 @@ def test_seed_loading_and_theme_queries(tmp_path):
     (words_dir / 'pet.txt').write_text('planet\ntravel\n', encoding='utf-8')
 
     init_db(str(db_path))
-    inserted = seed_words_from_files(str(db_path), source_dirs=[str(words_dir)])
+    inserted = seed_words_from_files(str(db_path), data_dir=str(words_dir))
 
     assert inserted == 4
 
     themes = list_themes(str(db_path))
     names = [theme['name'] for theme in themes]
-    assert names == ['KET', 'PET']
+    assert names == ['ket', 'pet']
 
     word_counts = {theme['name']: theme['word_count'] for theme in themes}
-    assert word_counts['KET'] == 2
-    assert word_counts['PET'] == 2
+    assert word_counts['ket'] == 2
+    assert word_counts['pet'] == 2
 
-    inserted_again = seed_words_from_files(str(db_path), source_dirs=[str(words_dir)])
+    inserted_again = seed_words_from_files(str(db_path), data_dir=str(words_dir))
     assert inserted_again == 0
