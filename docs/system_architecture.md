@@ -1,5 +1,11 @@
 # System Architecture Document
 
+## Scope
+
+This document reflects the architecture currently implemented in code and excludes future roadmap assumptions.
+
+---
+
 ## 1. System Overview
 
 This repository implements a browser-based Hangman learning game using a client-server architecture:

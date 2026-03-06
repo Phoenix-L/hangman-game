@@ -1,5 +1,11 @@
 # Product Features Report (现有产品说明书)
 
+## Scope
+
+This report describes only behavior that is implemented and verifiable in the current repository state.
+
+---
+
 ## 1. Product Overview
 
 当前产品是一个基于 **Flask + SQLite + 原生前端（HTML/CSS/JS）** 的 Hangman 单词学习游戏系统。系统已具备：
