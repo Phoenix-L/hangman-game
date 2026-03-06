@@ -7,6 +7,33 @@
 <body>
     <h1>Hangman</h1>
 
+    <div id="auth-bar" class="auth-bar">
+        <div id="auth-guest" class="auth-guest">
+            <button type="button" id="show-signup-btn" class="tab-btn">Sign up</button>
+            <button type="button" id="show-login-btn" class="tab-btn">Log in</button>
+        </div>
+        <div id="auth-user" class="auth-user hidden">
+            <span id="auth-username"></span>
+            <button type="button" id="logout-btn" class="tab-btn">Log out</button>
+        </div>
+    </div>
+    <div id="auth-forms" class="auth-forms hidden">
+        <div id="signup-form" class="auth-form card hidden">
+            <h3>Sign up</h3>
+            <input type="text" id="signup-username" placeholder="Username" minlength="3" required>
+            <input type="password" id="signup-password" placeholder="Password (min 6)" minlength="6" required>
+            <button type="button" id="signup-submit-btn">Sign up</button>
+            <p id="signup-message" class="auth-message"></p>
+        </div>
+        <div id="login-form" class="auth-form card hidden">
+            <h3>Log in</h3>
+            <input type="text" id="login-username" placeholder="Username">
+            <input type="password" id="login-password" placeholder="Password">
+            <button type="button" id="login-submit-btn">Log in</button>
+            <p id="login-message" class="auth-message"></p>
+        </div>
+    </div>
+
     <div class="top-nav">
         <button id="show-game-btn" class="tab-btn active">Play</button>
         <button id="show-progress-btn" class="tab-btn">Progress</button>

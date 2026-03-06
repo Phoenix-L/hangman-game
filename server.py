@@ -64,7 +64,10 @@ def random_word():
     if not words:
         return jsonify({'error': 'No words found in file'}), 404
 
-    return jsonify({'word': random.choice(words)})
+    response = jsonify({'word': random.choice(words)})
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    return response
 
 
 @app.route('/api/themes')
@@ -154,6 +157,12 @@ def login():
 
     session['user_id'] = user['id']
     return jsonify({'id': user['id'], 'username': user['username']}), 200
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def logout():
+    session.pop('user_id', None)
+    return jsonify({'ok': True}), 200
 
 
 @app.route('/api/me')
@@ -276,6 +285,15 @@ def submit_game_result():
         ), 201
     finally:
         conn.close()
+
+
+@app.route('/api/progress/summary')
+def get_progress_summary_route():
+    user_id = _current_user_id()
+    if not user_id:
+        return jsonify({'error': 'Authentication required'}), 401
+    summary = get_progress_summary(DB_PATH, user_id)
+    return jsonify(summary), 200
 
 
 @app.route('/api/leaderboard/global')

@@ -16,6 +16,52 @@ h2, h3 {
     color: #2e7031;
 }
 
+.auth-bar {
+    margin-bottom: 0.75em;
+}
+
+.auth-bar .tab-btn {
+    margin-right: 0.5em;
+}
+
+.auth-user span {
+    margin-right: 0.75em;
+    font-weight: 600;
+    color: #2e7031;
+}
+
+.auth-forms {
+    margin-bottom: 1em;
+}
+
+.auth-form input {
+    display: block;
+    margin: 0.4em auto;
+    padding: 0.4em 0.6em;
+    width: 100%;
+    max-width: 220px;
+    box-sizing: border-box;
+}
+
+.auth-form button {
+    margin-top: 0.5em;
+    cursor: pointer;
+}
+
+.auth-message {
+    margin-top: 0.5em;
+    font-size: 0.95em;
+    min-height: 1.2em;
+}
+
+.auth-message.error {
+    color: #d32f2f;
+}
+
+.auth-message.success {
+    color: #388e3c;
+}
+
 .top-nav {
     margin-bottom: 1.25em;
 }
