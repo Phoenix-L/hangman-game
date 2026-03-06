@@ -1,10 +1,9 @@
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Iterable
 
 DEFAULT_DB_PATH = "hangman.db"
-DEFAULT_WORD_DIRS = ("data/words", "word")
+DEFAULT_WORD_DATA_DIR = "data"
 
 
 SCHEMA_SQL = """
@@ -147,19 +146,15 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
         conn.close()
 
 
-def _collect_word_files(source_dirs: Iterable[str] | None = None) -> list[Path]:
-    dirs = source_dirs or DEFAULT_WORD_DIRS
-    files: list[Path] = []
-    for directory in dirs:
-        path = Path(directory)
-        if not path.exists() or not path.is_dir():
-            continue
-        files.extend(sorted(path.glob("*.txt")))
-    return files
+def _collect_word_files(data_dir: str = DEFAULT_WORD_DATA_DIR) -> list[Path]:
+    path = Path(data_dir)
+    if not path.exists() or not path.is_dir():
+        return []
+    return sorted(path.glob("*.txt"))
 
 
-def seed_words_from_files(db_path: str = DEFAULT_DB_PATH, source_dirs: Iterable[str] | None = None) -> int:
-    files = _collect_word_files(source_dirs)
+def seed_words_from_files(db_path: str = DEFAULT_DB_PATH, data_dir: str = DEFAULT_WORD_DATA_DIR) -> int:
+    files = _collect_word_files(data_dir)
     if not files:
         return 0
 
@@ -167,7 +162,7 @@ def seed_words_from_files(db_path: str = DEFAULT_DB_PATH, source_dirs: Iterable[
     inserted_words = 0
     try:
         for file_path in files:
-            theme_name = file_path.stem.upper()
+            theme_name = file_path.stem
             conn.execute(
                 "INSERT OR IGNORE INTO themes (name, description) VALUES (?, ?)",
                 (theme_name, f"Seeded from {file_path}"),
@@ -387,6 +382,6 @@ def get_progress_summary(db_path: str, user_id: int) -> dict:
         conn.close()
 
 
-def initialize_and_seed(db_path: str = DEFAULT_DB_PATH, source_dirs: Iterable[str] | None = None) -> int:
+def initialize_and_seed(db_path: str = DEFAULT_DB_PATH, data_dir: str = DEFAULT_WORD_DATA_DIR) -> int:
     init_db(db_path)
-    return seed_words_from_files(db_path=db_path, source_dirs=source_dirs)
+    return seed_words_from_files(db_path=db_path, data_dir=data_dir)

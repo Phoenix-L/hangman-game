@@ -10,12 +10,7 @@ from db import DEFAULT_DB_PATH, get_connection, init_db
 
 
 def _resolve_word_files(data_dir: Path) -> list[Path]:
-    base_files = sorted(data_dir.glob('*.txt'))
-    nested_files = sorted((data_dir / 'words').glob('*.txt'))
-
-    # Deduplicate while preserving deterministic ordering.
-    all_files = [*base_files, *nested_files]
-    return sorted({file.resolve(): file for file in all_files}.values(), key=lambda p: str(p))
+    return sorted(data_dir.glob('*.txt'))
 
 
 def seed_words(db_path: str, data_dir: str = 'data') -> tuple[int, int]:
@@ -25,7 +20,7 @@ def seed_words(db_path: str, data_dir: str = 'data') -> tuple[int, int]:
 
     files = _resolve_word_files(data_path)
     if not files:
-        raise FileNotFoundError(f"No .txt files found in {data_path}/ or {data_path / 'words'}/")
+        raise FileNotFoundError(f"No .txt files found in {data_path}/")
 
     init_db(db_path)
     conn = get_connection(db_path)
