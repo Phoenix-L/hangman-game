@@ -86,7 +86,6 @@ pytest -q
 - `POST /api/leaderboard_entries` requires login (guests receive `401`)
 - `POST /api/game/result` stores completed game results and computes score server-side
 - `GET /api/leaderboard/global?theme=<theme_id>&limit=50` returns ranked global scores
-- `GET /api/progress/summary` returns user learning dashboard metrics
 
 ## Manual auth test steps
 

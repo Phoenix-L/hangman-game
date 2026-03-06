@@ -278,16 +278,6 @@ def submit_game_result():
         conn.close()
 
 
-@app.route('/api/progress/summary')
-def progress_summary():
-    user_id = _current_user_id()
-    if not user_id:
-        return jsonify({'error': 'Authentication required'}), 401
-
-    summary = get_progress_summary(DB_PATH, user_id=user_id)
-    return jsonify(summary), 200
-
-
 @app.route('/api/leaderboard/global')
 def get_global_leaderboard():
     theme_id = request.args.get('theme', type=int)
