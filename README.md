@@ -84,6 +84,9 @@ pytest -q
 - `POST /api/auth/login` with JSON `{ "username": "...", "password": "..." }`
 - `GET /api/me` returns guest/user session info
 - `POST /api/leaderboard_entries` requires login (guests receive `401`)
+- `POST /api/game/result` stores completed game results and computes score server-side
+- `GET /api/leaderboard/global?theme=<theme_id>&limit=50` returns ranked global scores
+- `GET /api/progress/summary` returns user learning dashboard metrics
 
 ## Manual auth test steps
 
@@ -165,7 +168,43 @@ Guest mode behavior:
 - `POST /api/word/progress` (auth only) with `{ "word_id": <int>, "was_correct": <bool> }`
   - updates `times_seen`, `times_correct`, `times_wrong`, `last_seen_at`, `interval_days`, `next_review_at`
 
+## Manual game-result + leaderboard flow
+
+1. Start server: `python server.py`
+2. Fetch available themes:
+   ```bash
+   curl -s http://localhost:5000/api/themes
+   ```
+3. Login or sign up and keep session cookies (example with signup):
+   ```bash
+   curl -i -c cookies.txt -X POST http://localhost:5000/api/auth/signup \
+     -H "Content-Type: application/json" \
+     -d '{"username":"score_user","password":"secret123"}'
+   ```
+4. Submit game result (replace `word_id`/`theme_id` with real values):
+   ```bash
+   curl -i -b cookies.txt -X POST http://localhost:5000/api/game/result \
+     -H "Content-Type: application/json" \
+     -d '{"word_id":1,"theme_id":1,"duration_ms":12000,"guesses":{"correct":5,"wrong":1},"won":true}'
+   ```
+5. Read the global leaderboard:
+   ```bash
+   curl -s "http://localhost:5000/api/leaderboard/global?theme=1&limit=50"
+   ```
+
 ### Extension points
 
 - Swap scoring logic in `engine/word_selector.py` for alternate models.
 - Tune `recent_games_limit` and interval growth/reset behavior without changing API contracts.
+
+
+## Progress dashboard + share card (MVP)
+
+- Open **Progress** tab in the app to see:
+  - words seen
+  - words mastered
+  - 7-day accuracy
+  - per-theme breakdown
+  - streak days
+- Use **Share Progress Card** to generate a PNG card in-browser (Canvas) and download it for social sharing.
+- Mastery rule used by backend summary: `times_correct >= 3` and `interval_days >= 7`.

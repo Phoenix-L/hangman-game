@@ -6,11 +6,32 @@
 </head>
 <body>
     <h1>Hangman</h1>
-    <canvas id="hangman-canvas" width="200" height="250"></canvas>
-    <div id="word"></div>
-    <div id="wrong-letters"></div>
-    <div id="message"></div>
-    <button id="restart-btn" style="display:none;">Play Again</button>
+
+    <div class="top-nav">
+        <button id="show-game-btn" class="tab-btn active">Play</button>
+        <button id="show-progress-btn" class="tab-btn">Progress</button>
+    </div>
+
+    <section id="game-view">
+        <canvas id="hangman-canvas" width="200" height="250"></canvas>
+        <div id="word"></div>
+        <div id="wrong-letters"></div>
+        <div id="message"></div>
+        <button id="restart-btn" style="display:none;">Play Again</button>
+    </section>
+
+    <section id="progress-view" class="hidden">
+        <h2>My Progress 🌟</h2>
+        <div id="progress-summary" class="card"></div>
+        <div id="theme-progress" class="card"></div>
+        <button id="share-progress-btn">Share Progress Card</button>
+        <div id="share-preview" class="hidden">
+            <h3>Share Card Preview</h3>
+            <img id="share-image" alt="progress share card">
+        </div>
+        <canvas id="share-canvas" width="600" height="320" class="hidden"></canvas>
+    </section>
+
     <audio id="correct-sound" src="assets/correct.mp3"></audio>
     <audio id="wrong-sound" src="assets/wrong.mp3"></audio>
     <audio id="win-sound" src="assets/win.mp3"></audio>

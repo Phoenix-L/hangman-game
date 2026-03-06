@@ -37,12 +37,18 @@ CREATE TABLE IF NOT EXISTS games (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     word_id INTEGER,
+    theme_id INTEGER,
     status TEXT NOT NULL CHECK(status IN ('in_progress', 'won', 'lost')) DEFAULT 'in_progress',
     wrong_guesses INTEGER NOT NULL DEFAULT 0,
+    correct_guesses INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
+    accuracy REAL,
+    score INTEGER,
     started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     ended_at TEXT,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
-    FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE SET NULL
+    FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE SET NULL,
+    FOREIGN KEY(theme_id) REFERENCES themes(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS word_progress (
@@ -112,12 +118,29 @@ def _migrate_legacy_word_progress(conn: sqlite3.Connection) -> None:
         )
 
 
+def _ensure_games_columns(conn: sqlite3.Connection) -> None:
+    columns = conn.execute("PRAGMA table_info(games)").fetchall()
+    names = {col[1] for col in columns}
+
+    additions = [
+        ("theme_id", "INTEGER REFERENCES themes(id) ON DELETE SET NULL"),
+        ("correct_guesses", "INTEGER NOT NULL DEFAULT 0"),
+        ("duration_ms", "INTEGER"),
+        ("accuracy", "REAL"),
+        ("score", "INTEGER"),
+    ]
+    for column_name, column_type in additions:
+        if column_name not in names:
+            conn.execute(f"ALTER TABLE games ADD COLUMN {column_name} {column_type}")
+
+
 def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
     conn = get_connection(db_path)
     try:
         conn.executescript(SCHEMA_SQL)
         _ensure_users_password_hash_column(conn)
         _migrate_legacy_word_progress(conn)
+        _ensure_games_columns(conn)
         conn.commit()
     finally:
         conn.close()
@@ -237,6 +260,172 @@ def create_leaderboard_entry(db_path: str, user_id: int, score: int, game_id: in
         )
         conn.commit()
         return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
+def list_global_leaderboard(db_path: str, *, theme_id: int | None = None, limit: int = 50) -> list[dict]:
+    conn = get_connection(db_path)
+    try:
+        bounded_limit = max(1, min(50, int(limit)))
+
+        base = """
+            SELECT le.id,
+                   le.user_id,
+                   u.username,
+                   le.score,
+                   le.recorded_at,
+                   le.game_id,
+                   g.theme_id,
+                   g.word_id,
+                   g.duration_ms,
+                   g.correct_guesses,
+                   g.wrong_guesses,
+                   g.accuracy
+            FROM leaderboard_entries le
+            JOIN games g ON g.id = le.game_id
+            LEFT JOIN users u ON u.id = le.user_id
+        """
+        params: list[int] = []
+        if theme_id is not None:
+            base += " WHERE g.theme_id = ?"
+            params.append(theme_id)
+        base += " ORDER BY le.score DESC, le.recorded_at ASC, le.id ASC LIMIT ?"
+        params.append(bounded_limit)
+
+        rows = conn.execute(base, params).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_progress_summary(db_path: str, *, user_id: int) -> dict:
+    conn = get_connection(db_path)
+    try:
+        mastery_min_correct = 3
+        mastery_min_interval_days = 7
+
+        words_seen = conn.execute(
+            """
+            SELECT COUNT(*) AS c
+            FROM word_progress
+            WHERE user_id = ? AND times_seen > 0
+            """,
+            (user_id,),
+        ).fetchone()["c"]
+
+        words_mastered = conn.execute(
+            """
+            SELECT COUNT(*) AS c
+            FROM word_progress
+            WHERE user_id = ?
+              AND times_correct >= ?
+              AND interval_days >= ?
+            """,
+            (user_id, mastery_min_correct, mastery_min_interval_days),
+        ).fetchone()["c"]
+
+        seven_day = conn.execute(
+            """
+            SELECT COALESCE(SUM(correct_guesses), 0) AS correct_total,
+                   COALESCE(SUM(correct_guesses + wrong_guesses), 0) AS attempts_total
+            FROM games
+            WHERE user_id = ?
+              AND ended_at IS NOT NULL
+              AND ended_at >= datetime('now', '-7 days')
+            """,
+            (user_id,),
+        ).fetchone()
+
+        attempts_total = int(seven_day["attempts_total"] or 0)
+        correct_total = int(seven_day["correct_total"] or 0)
+        accuracy_7d = (correct_total / attempts_total) if attempts_total > 0 else None
+
+        theme_rows = conn.execute(
+            """
+            SELECT t.id AS theme_id,
+                   t.name AS theme_name,
+                   COUNT(CASE WHEN wp.times_seen > 0 THEN 1 END) AS words_seen,
+                   COUNT(CASE WHEN wp.times_correct >= ? AND wp.interval_days >= ? THEN 1 END) AS words_mastered
+            FROM themes t
+            JOIN words w ON w.theme_id = t.id
+            LEFT JOIN word_progress wp ON wp.word_id = w.id AND wp.user_id = ?
+            GROUP BY t.id, t.name
+            HAVING words_seen > 0
+            ORDER BY t.name
+            """,
+            (mastery_min_correct, mastery_min_interval_days, user_id),
+        ).fetchall()
+
+        theme_accuracy_rows = conn.execute(
+            """
+            SELECT theme_id,
+                   COALESCE(SUM(correct_guesses), 0) AS correct_total,
+                   COALESCE(SUM(correct_guesses + wrong_guesses), 0) AS attempts_total
+            FROM games
+            WHERE user_id = ?
+              AND ended_at IS NOT NULL
+              AND ended_at >= datetime('now', '-7 days')
+            GROUP BY theme_id
+            """,
+            (user_id,),
+        ).fetchall()
+        accuracy_by_theme = {
+            int(row["theme_id"]): (
+                (int(row["correct_total"]) / int(row["attempts_total"]))
+                if int(row["attempts_total"]) > 0
+                else None
+            )
+            for row in theme_accuracy_rows
+            if row["theme_id"] is not None
+        }
+
+        themes = [
+            {
+                "theme_id": int(row["theme_id"]),
+                "theme_name": row["theme_name"],
+                "words_seen": int(row["words_seen"]),
+                "words_mastered": int(row["words_mastered"]),
+                "accuracy_7d": accuracy_by_theme.get(int(row["theme_id"])),
+            }
+            for row in theme_rows
+        ]
+
+        played_dates = [
+            row["played_on"]
+            for row in conn.execute(
+                """
+                SELECT DISTINCT DATE(ended_at) AS played_on
+                FROM games
+                WHERE user_id = ? AND ended_at IS NOT NULL
+                ORDER BY played_on DESC
+                """,
+                (user_id,),
+            ).fetchall()
+            if row["played_on"]
+        ]
+
+        streak_days = 0
+        if played_dates:
+            from datetime import date, timedelta
+
+            parsed = {date.fromisoformat(value) for value in played_dates}
+            cursor = date.today()
+            while cursor in parsed:
+                streak_days += 1
+                cursor = cursor - timedelta(days=1)
+
+        return {
+            "words_seen": int(words_seen),
+            "words_mastered": int(words_mastered),
+            "accuracy_7d": accuracy_7d,
+            "themes": themes,
+            "streak_days": streak_days,
+            "mastery_rule": {
+                "times_correct_gte": mastery_min_correct,
+                "interval_days_gte": mastery_min_interval_days,
+            },
+        }
     finally:
         conn.close()
 
