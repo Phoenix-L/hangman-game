@@ -195,3 +195,15 @@ Guest mode behavior:
 
 - Swap scoring logic in `engine/word_selector.py` for alternate models.
 - Tune `recent_games_limit` and interval growth/reset behavior without changing API contracts.
+
+
+## Progress dashboard + share card (MVP)
+
+- Open **Progress** tab in the app to see:
+  - words seen
+  - words mastered
+  - 7-day accuracy
+  - per-theme breakdown
+  - streak days
+- Use **Share Progress Card** to generate a PNG card in-browser (Canvas) and download it for social sharing.
+- Mastery rule used by backend summary: `times_correct >= 3` and `interval_days >= 7`.

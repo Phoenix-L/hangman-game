@@ -10,6 +10,7 @@ from db import (
     get_connection,
     get_user_by_id,
     get_user_by_username,
+    get_progress_summary,
     initialize_and_seed,
     list_global_leaderboard,
     list_themes,
