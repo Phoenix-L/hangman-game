@@ -11,6 +11,7 @@ from db import (
     get_user_by_id,
     get_user_by_username,
     initialize_and_seed,
+    list_global_leaderboard,
     list_themes,
 )
 from engine.word_selector import select_guest_word, select_next_word, update_word_progress
@@ -22,6 +23,17 @@ WORD_DIR = 'word'
 DB_PATH = os.environ.get('HANGMAN_DB_PATH', DEFAULT_DB_PATH)
 
 initialize_and_seed(DB_PATH)
+
+
+def _compute_accuracy_and_score(duration_ms: int, correct_guesses: int, wrong_guesses: int, won: bool) -> tuple[float, int]:
+    total_guesses = correct_guesses + wrong_guesses
+    accuracy = (correct_guesses / total_guesses) if total_guesses > 0 else 0.0
+
+    clamped_duration = min(max(duration_ms, 0), 120_000)
+    speed_factor = 1.0 - (clamped_duration / 120_000)
+    won_bonus = 100 if won else 0
+    score = int(round((accuracy * 700) + (speed_factor * 300) + won_bonus))
+    return accuracy, score
 
 
 def _current_user_id() -> int | None:
@@ -172,6 +184,113 @@ def create_entry():
 
     entry_id = create_leaderboard_entry(DB_PATH, user_id=user_id, score=score, game_id=game_id)
     return jsonify({'id': entry_id, 'user_id': user_id, 'score': score, 'game_id': game_id}), 201
+
+
+@app.route('/api/game/result', methods=['POST'])
+def submit_game_result():
+    payload = request.get_json(silent=True) or {}
+    word_id = payload.get('word_id')
+    theme_id = payload.get('theme_id')
+    duration_ms = payload.get('duration_ms')
+    guesses = payload.get('guesses') if isinstance(payload.get('guesses'), dict) else None
+    won = payload.get('won')
+
+    if not isinstance(word_id, int) or not isinstance(theme_id, int) or not isinstance(duration_ms, int) or not isinstance(won, bool):
+        return jsonify({'error': 'word_id, theme_id, duration_ms(int) and won(bool) are required'}), 400
+    if duration_ms < 0:
+        return jsonify({'error': 'duration_ms must be >= 0'}), 400
+
+    if not guesses:
+        return jsonify({'error': 'guesses object is required'}), 400
+    correct_guesses = guesses.get('correct')
+    wrong_guesses = guesses.get('wrong')
+    if not isinstance(correct_guesses, int) or not isinstance(wrong_guesses, int):
+        return jsonify({'error': 'guesses.correct and guesses.wrong must be integers'}), 400
+    if correct_guesses < 0 or wrong_guesses < 0:
+        return jsonify({'error': 'guesses.correct and guesses.wrong must be >= 0'}), 400
+
+    conn = get_connection(DB_PATH)
+    user_id = _current_user_id()
+    try:
+        word_row = conn.execute(
+            "SELECT id, theme_id FROM words WHERE id = ? AND theme_id = ?",
+            (word_id, theme_id),
+        ).fetchone()
+        if not word_row:
+            return jsonify({'error': 'word_id does not belong to theme_id'}), 400
+
+        accuracy, score = _compute_accuracy_and_score(duration_ms, correct_guesses, wrong_guesses, won)
+        status = 'won' if won else 'lost'
+
+        cursor = conn.execute(
+            """
+            INSERT INTO games (
+                user_id,
+                word_id,
+                theme_id,
+                status,
+                wrong_guesses,
+                correct_guesses,
+                duration_ms,
+                accuracy,
+                score,
+                ended_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                user_id,
+                word_id,
+                theme_id,
+                status,
+                wrong_guesses,
+                correct_guesses,
+                duration_ms,
+                accuracy,
+                score,
+            ),
+        )
+        game_id = int(cursor.lastrowid)
+
+        progress = None
+        leaderboard_entry_id = None
+        if user_id:
+            progress = update_word_progress(conn, user_id=user_id, word_id=word_id, was_correct=won)
+            leaderboard_cursor = conn.execute(
+                "INSERT INTO leaderboard_entries (user_id, game_id, score) VALUES (?, ?, ?)",
+                (user_id, game_id, score),
+            )
+            leaderboard_entry_id = int(leaderboard_cursor.lastrowid)
+            conn.commit()
+        else:
+            conn.commit()
+
+        return jsonify(
+            {
+                'game_id': game_id,
+                'score': score,
+                'accuracy': accuracy,
+                'leaderboard_entry_id': leaderboard_entry_id,
+                'progress': progress,
+            }
+        ), 201
+    finally:
+        conn.close()
+
+
+@app.route('/api/leaderboard/global')
+def get_global_leaderboard():
+    theme_id = request.args.get('theme', type=int)
+    limit = request.args.get('limit', default=50, type=int)
+
+    entries = list_global_leaderboard(DB_PATH, theme_id=theme_id, limit=limit)
+    ranked = [
+        {
+            'rank': index,
+            **entry,
+        }
+        for index, entry in enumerate(entries, start=1)
+    ]
+    return jsonify({'entries': ranked}), 200
 
 
 
