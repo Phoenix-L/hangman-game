@@ -66,6 +66,32 @@ A classic Hangman word guessing game built with HTML, CSS, JavaScript, and a Pyt
 
 2. Open your browser and go to `http://localhost:5000`.
 
+## Offline mode
+
+You can run the game without the Flask server by opening a single HTML file in your browser.
+
+1. Generate the vocabulary file from `data/*.txt` (run whenever you change the word lists):
+
+   ```bash
+   python scripts/build_vocab_js.py
+   ```
+
+2. Open **index-offline.html** in your browser (e.g. double-click the file or drag it into the browser). No server is required.
+
+   - Vocabulary and themes come from **vocab.js** (generated in step 1).
+   - Word selection is random within the first theme; theme hint and score are shown locally.
+   - Sign-in and the Progress dashboard are disabled (they require the server).
+
+**To run from another folder** (e.g. a USB stick or shared folder), copy these files into one folder and open `index-offline.html`:
+
+- `index-offline.html`
+- `vocab.js` (exact filename)
+- `game.js`
+- `style.css`
+- `assets/` (folder with `correct.mp3`, `wrong.mp3`, `win.mp3`, `lose.mp3`)
+
+Development mode (Flask + database) is unchanged: use `index.html` at `http://localhost:5000` for full features (auth, progress, leaderboard).
+
 ## Run tests
 
 ```bash

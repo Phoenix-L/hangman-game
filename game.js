@@ -1,14 +1,17 @@
+// Offline mode: set to true by index-offline.html (vocab.js must load first).
+window.OFFLINE_MODE = window.OFFLINE_MODE || false;
+
 let selectedWord = '';
 let correctLetters = [];
 let wrongLetters = [];
 const maxWrong = 6;
 
-// For progress/leaderboard: word and theme from /api/word/next
+// For progress/leaderboard: word and theme from /api/word/next (or offline selection)
 let currentWordId = null;
 let currentThemeId = null;
 let currentThemeName = '';
 let gameStartTime = null;
-let defaultThemeId = 1;
+let defaultThemeId = 1; // number when online (API theme id), string when offline (theme key e.g. "KET_ANIMALS")
 
 const wordDiv = document.getElementById('word');
 const wrongDiv = document.getElementById('wrong-letters');
@@ -32,12 +35,58 @@ const shareCanvas = document.getElementById('share-canvas');
 
 let latestProgressSummary = null;
 
+// --- Offline: theme display name (mirrors backend theme_display_name) ---
+function themeDisplayName(themeName) {
+    if (!themeName || !String(themeName).trim()) return 'Vocabulary';
+    const parts = String(themeName).trim().split('_');
+    return parts.length ? parts[parts.length - 1].replace(/^\w/, c => c.toUpperCase()) : themeName;
+}
+
+// --- Offline: select random word from VOCAB (must load vocab.js before game.js) ---
+function selectWordOffline(themeKey) {
+    if (typeof VOCAB === 'undefined' || !VOCAB[themeKey] || VOCAB[themeKey].length === 0) return null;
+    const words = VOCAB[themeKey];
+    const value = words[Math.floor(Math.random() * words.length)];
+    return {
+        word: { value: value },
+        theme: themeKey,
+        theme_display: themeDisplayName(themeKey),
+    };
+}
+
+// --- Offline: compute score locally (same formula as server) ---
+function computeLocalScore(durationMs, correctGuesses, wrongGuesses, won) {
+    const total = correctGuesses + wrongGuesses;
+    const accuracy = total > 0 ? correctGuesses / total : 0;
+    const clampedDuration = Math.min(Math.max(durationMs, 0), 120000);
+    const speedFactor = 1.0 - clampedDuration / 120000;
+    const wonBonus = won ? 100 : 0;
+    return Math.round(accuracy * 700 + speedFactor * 300 + wonBonus);
+}
+
 function loadWord(callback) {
     restartBtn.style.display = 'none';
     currentWordId = null;
     currentThemeId = null;
     currentThemeName = '';
     if (themeHintEl) themeHintEl.textContent = '';
+
+    if (window.OFFLINE_MODE && typeof VOCAB !== 'undefined' && typeof THEMES !== 'undefined') {
+        const themeKey = typeof defaultThemeId === 'string' ? defaultThemeId : (THEMES[0] && THEMES[0].id) || 'KET_ANIMALS';
+        const data = selectWordOffline(themeKey);
+        if (data && data.word && data.word.value) {
+            selectedWord = data.word.value.toLowerCase();
+            currentThemeName = (data.theme_display != null && data.theme_display !== '') ? data.theme_display : (data.theme || 'Vocabulary');
+            gameStartTime = Date.now();
+            correctLetters = [];
+            wrongLetters = [];
+            if (messageDiv) messageDiv.textContent = '';
+            callback();
+        } else {
+            alert('No words found for theme. Ensure vocab.js is loaded.');
+        }
+        return;
+    }
 
     const url = '/api/word/next?theme=' + defaultThemeId + '&_=' + Date.now();
     fetch(url, { credentials: 'same-origin' })
@@ -132,8 +181,15 @@ function showMessage(msg, color = '#1976d2') {
 }
 
 function submitGameResult(won) {
+    const durationMs = gameStartTime ? Math.max(0, Date.now() - gameStartTime) : 0;
+    const correctCount = correctLetters.length;
+    const wrongCount = wrongLetters.length;
+
+    if (window.OFFLINE_MODE) {
+        window.lastOfflineScore = computeLocalScore(durationMs, correctCount, wrongCount, won);
+        return;
+    }
     if (currentWordId == null || currentThemeId == null) return;
-    const duration_ms = gameStartTime ? Math.max(0, Date.now() - gameStartTime) : 0;
     fetch('/api/game/result', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -141,8 +197,8 @@ function submitGameResult(won) {
         body: JSON.stringify({
             word_id: currentWordId,
             theme_id: currentThemeId,
-            duration_ms: duration_ms,
-            guesses: { correct: correctLetters.length, wrong: wrongLetters.length },
+            duration_ms: durationMs,
+            guesses: { correct: correctCount, wrong: wrongCount },
             won: won,
         }),
     }).catch(() => {});
@@ -150,16 +206,24 @@ function submitGameResult(won) {
 
 function checkGameStatus() {
     if (wordDiv.textContent.replace(/ /g, '') === selectedWord) {
-        showMessage('Congratulations! You won! 🎉', '#388e3c');
         submitGameResult(true);
+        let msg = 'Congratulations! You won! 🎉';
+        if (window.OFFLINE_MODE && window.lastOfflineScore != null) {
+            msg += ' Score: ' + window.lastOfflineScore;
+        }
+        showMessage(msg, '#388e3c');
         const winAudio = document.getElementById('win-sound');
         if (winAudio) winAudio.play();
         restartBtn.style.display = 'inline-block';
         return true;
     }
     if (wrongLetters.length >= maxWrong) {
-        showMessage('Game Over! The word was: ' + selectedWord, '#d32f2f');
         submitGameResult(false);
+        let msg = 'Game Over! The word was: ' + selectedWord;
+        if (window.OFFLINE_MODE && window.lastOfflineScore != null) {
+            msg += ' Score: ' + window.lastOfflineScore;
+        }
+        showMessage(msg, '#d32f2f');
         const loseAudio = document.getElementById('lose-sound');
         if (loseAudio) loseAudio.play();
         restartBtn.style.display = 'inline-block';
@@ -251,6 +315,11 @@ function loadProgressSummary() {
     progressSummaryDiv.innerHTML = '<p>Loading progress…</p>';
     themeProgressDiv.innerHTML = '';
 
+    if (window.OFFLINE_MODE) {
+        progressSummaryDiv.innerHTML = '<p>Progress (words seen, mastered, accuracy) is available when using the server. Play in offline mode to practice!</p>';
+        themeProgressDiv.innerHTML = '';
+        return Promise.resolve();
+    }
     return fetch('/api/progress/summary')
         .then(response => {
             if (response.status === 401) {
@@ -404,6 +473,12 @@ function closeAuthForms() {
 }
 
 function refreshAuth() {
+    if (window.OFFLINE_MODE) {
+        showAuthGuest();
+        const authBar = document.getElementById('auth-bar');
+        if (authBar) authBar.classList.add('offline-mode');
+        return;
+    }
     fetch('/api/me', { credentials: 'same-origin' })
         .then(r => r.json())
         .then(data => {
@@ -495,6 +570,11 @@ logoutBtn.addEventListener('click', () => {
 });
 
 function startGame() {
+    if (window.OFFLINE_MODE && typeof THEMES !== 'undefined' && THEMES.length > 0) {
+        defaultThemeId = THEMES[0].id;
+        loadWord(updateDisplay);
+        return;
+    }
     fetch('/api/themes', { credentials: 'same-origin' })
         .then(r => r.json())
         .then(data => {

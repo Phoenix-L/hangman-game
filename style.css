@@ -142,6 +142,17 @@ h2, h3 {
     padding-left: 1.2em;
 }
 
+/* Offline mode: hide sign up / log in, show label */
+.auth-bar.offline-mode .auth-guest,
+.auth-bar.offline-mode .auth-user {
+    display: none !important;
+}
+.auth-bar.offline-mode::after {
+    content: "Offline mode";
+    font-size: 0.9em;
+    color: #666;
+}
+
 .hidden {
     display: none;
 }

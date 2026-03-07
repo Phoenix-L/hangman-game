@@ -1,6 +1,0 @@
-bus
-train
-plane
-boat
-taxi
-truck
