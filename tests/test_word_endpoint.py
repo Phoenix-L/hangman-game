@@ -16,7 +16,7 @@ def client_with_seeded_db(tmp_path, monkeypatch):
     (words_dir / 'ket.txt').write_text('cat\ndog\n', encoding='utf-8')
 
     init_db(str(db_path))
-    seed_words_from_files(str(db_path), source_dirs=[str(words_dir)])
+    seed_words_from_files(str(db_path), data_dir=str(words_dir))
 
     monkeypatch.setattr(server, 'DB_PATH', str(db_path))
     server.app.config['TESTING'] = True
@@ -30,7 +30,7 @@ def test_get_word_next_guest_mode(client_with_seeded_db):
 
     conn = get_connection(db_path)
     try:
-        theme_id = conn.execute("SELECT id FROM themes WHERE name='KET'").fetchone()['id']
+        theme_id = conn.execute("SELECT id FROM themes WHERE name='ket'").fetchone()['id']
     finally:
         conn.close()
 
@@ -49,7 +49,7 @@ def test_get_word_next_authenticated_uses_engine(client_with_seeded_db):
 
     conn = get_connection(db_path)
     try:
-        theme_id = conn.execute("SELECT id FROM themes WHERE name='KET'").fetchone()['id']
+        theme_id = conn.execute("SELECT id FROM themes WHERE name='ket'").fetchone()['id']
     finally:
         conn.close()
 

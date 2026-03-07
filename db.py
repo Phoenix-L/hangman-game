@@ -1,7 +1,6 @@
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Iterable
 
 DEFAULT_DB_PATH = "hangman.db"
 # By default, seed from top-level txt files in data/.
