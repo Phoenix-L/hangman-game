@@ -71,7 +71,7 @@ Responsibilities:
 
 Responsibilities:
 
-- Define SQLite schema (`users`, `themes`, `words`, `games`, `word_progress`, `leaderboard_entries`)
+- Define SQLite schema (`users`, `themes`, `words`, `games`, `word_progress`, `user_word_progress`, `leaderboard_entries`)
 - Initialize and migrate schema-compatible changes
 - Seed themes/words from `data/*.txt`
 - Provide utility functions for users, themes, leaderboard, and progress summary queries
@@ -213,10 +213,10 @@ Flask route: get_next_word()
   | if logged in -> select_next_word(...)
   | else         -> select_guest_word(...)
   v
-SQLite (words/games/word_progress)
+SQLite (words/games/user_word_progress)
   |
   v
-Selected word + reason
+Selected word + review status
   |
   v
 JSON response to browser
@@ -246,6 +246,9 @@ Browser updates selectedWord and renders masked letters
 4. Logout clears session via `/api/auth/logout`.
 
 ## 5.3 Progress Flow
+
+The learning scheduler persists per-user state in `user_word_progress` and updates it with a simplified SM-2-like rule after each completed game.
+
 
 1. Frontend opens Progress tab.
 2. Calls `/api/progress/summary`.
