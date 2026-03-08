@@ -142,13 +142,16 @@ def select_next_word(
     user_id: int,
     theme_id: int,
     *,
-    recent_games_limit: int = 3,
+    recent_games_limit: int = 20,
     now: datetime | None = None,
     rng: random.Random | None = None,
 ) -> SelectionResult:
     """
     Selection priority:
     1) due review 2) difficult 3) unseen/new 4) random fallback.
+
+    Fallback only considers words that are due or have no progress; words
+    that were correctly answered and are not yet due are excluded.
     """
     rng = rng or random.Random()
     excluded_word_ids = _recent_word_ids(conn, user_id, recent_games_limit)
@@ -166,10 +169,20 @@ def select_next_word(
     if picked_new:
         return SelectionResult(word=dict(picked_new), reason='new')
 
+    # Fallback: only words with no progress, or progress that is due (next_review <= now).
+    # Excludes words that were successfully answered and are scheduled for later review.
     excluded_sql, excluded_params = _excluded_clause(excluded_word_ids)
+    now_text = _to_db_ts(now)
     fallback_rows = conn.execute(
-        f"SELECT w.id, w.theme_id, w.value FROM words w WHERE w.theme_id = ? {excluded_sql}",
-        (theme_id, *excluded_params),
+        f"""
+        SELECT w.id, w.theme_id, w.value
+        FROM words w
+        LEFT JOIN user_word_progress p ON p.word_id = w.id AND p.user_id = ?
+        WHERE w.theme_id = ?
+          AND (p.word_id IS NULL OR p.next_review IS NULL OR p.next_review <= ?)
+          {excluded_sql}
+        """,
+        (user_id, theme_id, now_text, *excluded_params),
     ).fetchall()
     fallback = _pick_random(fallback_rows, rng)
     if fallback:

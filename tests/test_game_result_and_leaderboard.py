@@ -154,13 +154,17 @@ def test_global_leaderboard_orders_by_score_desc(seeded_client):
 
     assert score_two > score_one
 
-    lb = client.get(f'/api/leaderboard/global?theme={theme_id}&limit=50')
+    lb = client.get('/api/leaderboard/global?period=all&limit=50')
     assert lb.status_code == 200
-    entries = lb.get_json()['entries']
+    data = lb.get_json()
+    entries = data['entries']
+    assert data['period'] == 'all'
     assert len(entries) == 2
-    assert entries[0]['score'] >= entries[1]['score']
+    assert entries[0]['leaderboard_score'] >= entries[1]['leaderboard_score']
     assert entries[0]['rank'] == 1
     assert entries[1]['rank'] == 2
+    assert 'username' in entries[0]
+    assert 'current_streak_days' in entries[0]
 
     guest_client = importlib.import_module('server').app.test_client()
     guest_restricted = guest_client.post('/api/leaderboard_entries', json={'score': 99})

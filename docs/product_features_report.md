@@ -129,9 +129,9 @@ This report describes only behavior that is implemented and verifiable in the cu
 
 **成绩与排行榜**
 
-- `POST /api/game/result`（服务器计算分数）
+- `POST /api/game/result`（服务器计算分数；认证用户会更新 user_stats 与 streak，响应中可含 rank / leaderboard_score / current_streak_days）
 - `POST /api/leaderboard_entries`
-- `GET /api/leaderboard/global`
+- `GET /api/leaderboard/global?period=today|week|all&limit=N`：按用户聚合的排行榜，每人一行；`leaderboard_score` = 时间衰减得分 + 连续天数加成 + 当日活跃加成；支持今日 / 本周 / 全部时段。
 
 **学习进度**
 
@@ -151,6 +151,9 @@ This report describes only behavior that is implemented and verifiable in the cu
 - 进度面板（见词数、掌握词数、7天准确率、连续天数、主题维度统计）
 - 进度分享卡（Canvas 生成 PNG 并自动下载）
 - 音效（correct / wrong / win / lose）
+- Play 页迷你排行榜（本周 Top 5：排名、玩家、综合得分、连续天数；当前用户高亮）
+- Progress 页完整排行榜（Today / This Week / All Time 切换；排名、得分、连续天数、最近活跃；当前用户摘要卡与“每日挑战”占位）
+- 对局结束消息中展示：得分、准确率、当前排名、连续天数（若已登录）
 
 ---
 
