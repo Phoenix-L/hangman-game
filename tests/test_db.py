@@ -2,11 +2,15 @@ from pathlib import Path
 
 from db import (
     clear_themes_and_words,
+    create_user,
+    create_user_word_progress,
     get_random_word,
     get_theme_name_by_id,
+    get_user_word_progress,
     init_db,
     list_themes,
     seed_words_from_files,
+    update_user_word_progress,
 )
 
 
@@ -35,6 +39,7 @@ def test_init_db_creates_expected_tables(tmp_path):
         'games',
         'word_progress',
         'leaderboard_entries',
+        'user_word_progress',
     }
     assert expected.issubset(tables)
 
@@ -47,19 +52,19 @@ def test_seed_loading_and_theme_queries(tmp_path):
     (words_dir / 'pet.txt').write_text('planet\ntravel\n', encoding='utf-8')
 
     init_db(str(db_path))
-    inserted = seed_words_from_files(str(db_path), data_dir=str(words_dir))
+    inserted = seed_words_from_files(str(db_path), source_dirs=[str(words_dir)])
 
     assert inserted == 4
 
     themes = list_themes(str(db_path))
     names = [theme['name'] for theme in themes]
-    assert names == ['ket', 'pet']
+    assert names == ['KET', 'PET']
 
     word_counts = {theme['name']: theme['word_count'] for theme in themes}
-    assert word_counts['ket'] == 2
-    assert word_counts['pet'] == 2
+    assert word_counts['KET'] == 2
+    assert word_counts['PET'] == 2
 
-    inserted_again = seed_words_from_files(str(db_path), data_dir=str(words_dir))
+    inserted_again = seed_words_from_files(str(db_path), source_dirs=[str(words_dir)])
     assert inserted_again == 0
 
 
@@ -99,3 +104,75 @@ def test_get_random_word_returns_value_and_theme(tmp_path):
     # Empty DB returns None
     clear_themes_and_words(str(db_path))
     assert get_random_word(str(db_path)) is None
+
+
+def test_user_word_progress_crud(tmp_path):
+    db_path = tmp_path / "progress.db"
+    words_dir = tmp_path / "words"
+    words_dir.mkdir()
+    (words_dir / "animals.txt").write_text("cat\n", encoding="utf-8")
+
+    init_db(str(db_path))
+    seed_words_from_files(str(db_path), source_dirs=[str(words_dir)])
+
+    user_id = create_user(str(db_path), "alice", "hash")
+    assert user_id is not None
+
+    conn = __import__("sqlite3").connect(db_path)
+    word_id = conn.execute("SELECT id FROM words WHERE value='cat'").fetchone()[0]
+    conn.close()
+
+    assert get_user_word_progress(str(db_path), user_id, word_id) is None
+
+    created = create_user_word_progress(str(db_path), user_id, word_id)
+    assert created["user_id"] == user_id
+    assert created["word_id"] == word_id
+    assert created["correct_count"] == 0
+    assert created["wrong_count"] == 0
+    assert created["ease_factor"] == 2.5
+    assert created["interval"] == 1
+
+    updated = update_user_word_progress(
+        str(db_path),
+        user_id,
+        word_id,
+        correct_count=3,
+        wrong_count=1,
+        last_seen="2026-01-01T12:00:00Z",
+        next_review="2026-01-05T12:00:00Z",
+        ease_factor=2.7,
+        interval=4,
+    )
+    assert updated["correct_count"] == 3
+    assert updated["wrong_count"] == 1
+    assert updated["last_seen"] == "2026-01-01T12:00:00Z"
+    assert updated["next_review"] == "2026-01-05T12:00:00Z"
+    assert updated["ease_factor"] == 2.7
+    assert updated["interval"] == 4
+
+
+def test_user_word_progress_indexes_and_unique_constraint(tmp_path):
+    db_path = tmp_path / "progress_meta.db"
+
+    init_db(str(db_path))
+
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        indexes = {
+            row[1]
+            for row in conn.execute("PRAGMA index_list('user_word_progress')").fetchall()
+        }
+        assert "idx_user_word_progress_next_review" in indexes
+        assert "idx_user_word_progress_user_id" in indexes
+
+        index_rows = conn.execute("PRAGMA index_list('user_word_progress')").fetchall()
+        unique_index_names = [row[1] for row in index_rows if row[2] == 1]
+        unique_index_columns = [
+            [info[2] for info in conn.execute(f"PRAGMA index_info('{idx_name}')").fetchall()]
+            for idx_name in unique_index_names
+        ]
+        assert ["user_id", "word_id"] in unique_index_columns
+    finally:
+        conn.close()
