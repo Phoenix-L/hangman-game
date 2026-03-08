@@ -7,7 +7,7 @@ A classic Hangman word guessing game built with HTML, CSS, JavaScript, and a Pyt
 - Classic hangman gameplay
 - Word guessing mechanics
 - Visual hangman drawing
-- Score tracking
+- Score tracking and user-aggregated leaderboard (time-decayed scores, streak bonus, daily activity bonus; periods: today / week / all)
 - Web interface with sound effects
 - SQLite schema + seed loader for themes and words
 

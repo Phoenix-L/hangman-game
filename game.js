@@ -186,11 +186,13 @@ function submitGameResult(won) {
     const wrongCount = wrongLetters.length;
 
     if (window.OFFLINE_MODE) {
-        window.lastOfflineScore = computeLocalScore(durationMs, correctCount, wrongCount, won);
-        return;
+        const score = computeLocalScore(durationMs, correctCount, wrongCount, won);
+        const total = correctCount + wrongCount;
+        const accuracy = total > 0 ? correctCount / total : 0;
+        return Promise.resolve({ score, accuracy });
     }
-    if (currentWordId == null || currentThemeId == null) return;
-    fetch('/api/game/result', {
+    if (currentWordId == null || currentThemeId == null) return Promise.resolve({ score: null, accuracy: null });
+    return fetch('/api/game/result', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -201,29 +203,50 @@ function submitGameResult(won) {
             guesses: { correct: correctCount, wrong: wrongCount },
             won: won,
         }),
-    }).catch(() => {});
+    })
+        .then(function (r) { return r.ok ? r.json() : {}; })
+        .then(function (body) {
+            return {
+                score: body.score != null ? body.score : null,
+                accuracy: body.accuracy != null ? body.accuracy : null,
+                rank: body.rank != null ? body.rank : null,
+                leaderboard_score: body.leaderboard_score != null ? body.leaderboard_score : null,
+                current_streak_days: body.current_streak_days != null ? body.current_streak_days : null
+            };
+        })
+        .catch(function () { return { score: null, accuracy: null }; });
 }
 
 function checkGameStatus() {
     if (wordDiv.textContent.replace(/ /g, '') === selectedWord) {
-        submitGameResult(true);
-        let msg = 'Congratulations! You won! 🎉';
-        if (window.OFFLINE_MODE && window.lastOfflineScore != null) {
-            msg += ' Score: ' + window.lastOfflineScore;
-        }
-        showMessage(msg, '#388e3c');
+        submitGameResult(true).then(function (result) {
+            let msg = 'You Win!';
+            if (result && result.score != null) {
+                msg += '\nScore: ' + result.score;
+                if (result.accuracy != null) msg += '\nAccuracy: ' + Math.round(result.accuracy * 100) + '%';
+                if (result.rank != null) msg += '\nYour Rank: #' + result.rank;
+                if (result.current_streak_days != null && result.current_streak_days > 0) msg += '\n\uD83D\uDD25 Streak: ' + result.current_streak_days + ' day(s)';
+            }
+            showMessage(msg, '#388e3c');
+            loadLeaderboard(5, 'leaderboard', 'week');
+        });
         const winAudio = document.getElementById('win-sound');
         if (winAudio) winAudio.play();
         restartBtn.style.display = 'inline-block';
         return true;
     }
     if (wrongLetters.length >= maxWrong) {
-        submitGameResult(false);
-        let msg = 'Game Over! The word was: ' + selectedWord;
-        if (window.OFFLINE_MODE && window.lastOfflineScore != null) {
-            msg += ' Score: ' + window.lastOfflineScore;
-        }
-        showMessage(msg, '#d32f2f');
+        submitGameResult(false).then(function (result) {
+            let msg = 'Game Over\nThe word was: ' + selectedWord;
+            if (result && result.score != null) {
+                msg += '\nScore: ' + result.score;
+                if (result.accuracy != null) msg += '\nAccuracy: ' + Math.round(result.accuracy * 100) + '%';
+                if (result.rank != null) msg += '\nYour Rank: #' + result.rank;
+                if (result.current_streak_days != null && result.current_streak_days > 0) msg += '\n\uD83D\uDD25 Streak: ' + result.current_streak_days + ' day(s)';
+            }
+            showMessage(msg, '#d32f2f');
+            loadLeaderboard(5, 'leaderboard', 'week');
+        });
         const loseAudio = document.getElementById('lose-sound');
         if (loseAudio) loseAudio.play();
         restartBtn.style.display = 'inline-block';
@@ -390,6 +413,81 @@ function showProgressView() {
     showGameBtn.classList.remove('active');
     showProgressBtn.classList.add('active');
     loadProgressSummary();
+    loadProgressLeaderboard(window.leaderboardPeriod || 'week');
+}
+
+// --- Leaderboard (aggregated per-user; period: today | week | all) ---
+function loadLeaderboard(limit, containerId, period, options) {
+    options = options || {};
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (window.OFFLINE_MODE) {
+        container.innerHTML = '<p class="leaderboard-placeholder">Leaderboard available when online.</p>';
+        return;
+    }
+
+    period = period || 'week';
+    const url = '/api/leaderboard/global?limit=' + (limit || 5) + '&period=' + encodeURIComponent(period);
+    const maxEntries = limit || 5;
+    const showStreak = options.showStreak !== false;
+    const showLastActive = options.showLastActive === true;
+    const title = options.title !== undefined ? options.title : (period === 'today' ? "Today's Top Players" : period === 'week' ? "This Week's Top Players" : "All Time Leaders");
+
+    fetch(url, { credentials: 'same-origin' })
+        .then(function (r) {
+            if (!r.ok) return { ok: false };
+            return r.json().then(function (data) { return { ok: true, entries: data.entries || [], period: data.period }; });
+        })
+        .then(function (result) {
+            if (result.ok === false) {
+                container.innerHTML = '<p class="leaderboard-placeholder">Could not load leaderboard.</p>';
+                return;
+            }
+            const entries = result.entries.slice(0, maxEntries);
+            if (entries.length === 0) {
+                container.innerHTML = '<p class="leaderboard-placeholder">No entries yet. Play a game to appear here!</p>';
+                return;
+            }
+            var tableTitle = '';
+            if (options.showTitle !== false && title) {
+                tableTitle = '<p class="leaderboard-title">' + escapeHtml(title) + '</p>';
+            }
+            const rows = entries
+                .map(function (e, i) {
+                    const rank = (e.rank != null ? e.rank : i + 1);
+                    const name = (e.is_current_user ? 'You' : (e.username || 'Guest'));
+                    const score = e.leaderboard_score != null ? e.leaderboard_score : (e.score != null ? e.score : 0);
+                    var streakCell = '';
+                    if (showStreak && e.current_streak_days != null) {
+                        streakCell = '<td class="lb-streak">' + (e.current_streak_days > 0 ? '\uD83D\uDD25 ' + e.current_streak_days : '-') + '</td>';
+                    }
+                    var lastActiveCell = '';
+                    if (showLastActive && e.last_active) {
+                        lastActiveCell = '<td class="lb-last-active">' + escapeHtml(String(e.last_active).slice(0, 10)) + '</td>';
+                    }
+                    const rowClass = e.is_current_user ? ' class="lb-you"' : '';
+                    return '<tr' + rowClass + '><td class="lb-rank">' + rank + '</td><td class="lb-name">' + escapeHtml(name) + '</td><td class="lb-score">' + score + '</td>' + streakCell + lastActiveCell + '</tr>';
+                })
+                .join('');
+            const headerStreak = showStreak ? '<th class="lb-streak">Streak</th>' : '';
+            const headerLastActive = showLastActive ? '<th class="lb-last-active">Last active</th>' : '';
+            container.innerHTML = tableTitle + '<table class="leaderboard-table"><thead><tr><th class="lb-rank">#</th><th class="lb-name">Player</th><th class="lb-score">Score</th>' + headerStreak + headerLastActive + '</tr></thead><tbody>' + rows + '</tbody></table>';
+
+            if (options.onSelfEntry && result.entries) {
+                const selfEntry = result.entries.filter(function (e) { return e.is_current_user; })[0];
+                if (selfEntry) options.onSelfEntry(selfEntry);
+            }
+        })
+        .catch(function () {
+            container.innerHTML = '<p class="leaderboard-placeholder">Could not load leaderboard.</p>';
+        });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 document.addEventListener('keydown', (e) => {
@@ -413,10 +511,40 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+function loadProgressLeaderboard(period) {
+    window.leaderboardPeriod = period || 'week';
+    const containerId = 'progress-leaderboard';
+    const summaryEl = document.getElementById('leaderboard-self-summary');
+    loadLeaderboard(20, containerId, period, {
+        showTitle: false,
+        showStreak: true,
+        showLastActive: true,
+        onSelfEntry: function (entry) {
+            if (!summaryEl) return;
+            summaryEl.classList.remove('hidden');
+            summaryEl.innerHTML = '<p class="lb-self-title">Your ranking</p>' +
+                '<p><strong>Rank:</strong> #' + entry.rank + '</p>' +
+                '<p><strong>Leaderboard score:</strong> ' + entry.leaderboard_score + '</p>' +
+                '<p><strong>Streak:</strong> ' + (entry.current_streak_days > 0 ? '\uD83D\uDD25 ' + entry.current_streak_days + ' day(s)' : '0 days') + '</p>' +
+                '<p class="lb-challenge-placeholder">Daily challenge: coming soon</p>';
+        }
+    });
+    var todayBtn = document.getElementById('lb-tab-today');
+    var weekBtn = document.getElementById('lb-tab-week');
+    var allBtn = document.getElementById('lb-tab-all');
+    if (todayBtn) todayBtn.classList.toggle('active', period === 'today');
+    if (weekBtn) weekBtn.classList.toggle('active', period === 'week');
+    if (allBtn) allBtn.classList.toggle('active', period === 'all');
+}
+
 restartBtn.addEventListener('click', () => loadWord(updateDisplay));
 showGameBtn.addEventListener('click', showGameView);
 showProgressBtn.addEventListener('click', showProgressView);
 shareProgressBtn.addEventListener('click', shareProgressCard);
+
+document.getElementById('lb-tab-today') && document.getElementById('lb-tab-today').addEventListener('click', function () { loadProgressLeaderboard('today'); });
+document.getElementById('lb-tab-week') && document.getElementById('lb-tab-week').addEventListener('click', function () { loadProgressLeaderboard('week'); });
+document.getElementById('lb-tab-all') && document.getElementById('lb-tab-all').addEventListener('click', function () { loadProgressLeaderboard('all'); });
 
 // --- Auth UI ---
 const authGuest = document.getElementById('auth-guest');
@@ -443,6 +571,7 @@ function showAuthGuest() {
     authForms.classList.add('hidden');
     signupForm.classList.add('hidden');
     loginForm.classList.add('hidden');
+    window.currentUsername = null;
 }
 
 function showAuthUser(username) {
@@ -450,6 +579,7 @@ function showAuthUser(username) {
     authUser.classList.remove('hidden');
     authForms.classList.add('hidden');
     authUsername.textContent = 'Logged in as ' + username;
+    window.currentUsername = username || null;
 }
 
 function openSignup() {
@@ -573,6 +703,7 @@ function startGame() {
     if (window.OFFLINE_MODE && typeof THEMES !== 'undefined' && THEMES.length > 0) {
         defaultThemeId = THEMES[0].id;
         loadWord(updateDisplay);
+        loadLeaderboard(5, 'leaderboard', 'week');
         return;
     }
     fetch('/api/themes', { credentials: 'same-origin' })
@@ -582,8 +713,12 @@ function startGame() {
                 defaultThemeId = data.themes[0].id;
             }
             loadWord(updateDisplay);
+            loadLeaderboard(5, 'leaderboard', 'week');
         })
-        .catch(() => loadWord(updateDisplay));
+        .catch(function () {
+            loadWord(updateDisplay);
+            loadLeaderboard(5, 'leaderboard', 'week');
+        });
 }
 
 refreshAuth();

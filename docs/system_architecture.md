@@ -293,9 +293,16 @@ Core tables and meaning:
 - `words`: words scoped by theme (`UNIQUE(theme_id, value)`)
 - `games`: per-game outcomes, guess metrics, duration, computed score
 - `word_progress`: spaced repetition state per (user, word)
-- `leaderboard_entries`: score records linked to game/user
+- `leaderboard_entries`: per-game score records linked to game/user (legacy; still written for each completed game).
+- `user_stats`: one row per user for aggregated leaderboard (total_games, total_score, current_streak_days, last_played_date, lifetime_xp). Updated on each game result; used for ranking.
 
-This model enables both game analytics and adaptive learning progression.
+**Leaderboard ranking (user-aggregated):** Each user appears once. Rank is by `leaderboard_score`:
+
+- **Formula:** `leaderboard_score = SUM(score * POWER(decay_factor, age_in_days)) + streak_bonus + daily_activity_bonus + challenge_bonus_hook`
+- **Defaults (db.py):** decay_factor=0.94, streak_bonus = min(current_streak_days, 30)*8, daily_activity_bonus=50 if played today, challenge_bonus_hook=0 (future daily challenge).
+- **Streak rules:** First play or gap > 1 day → 1; played yesterday → +1; already played today → unchanged.
+- **Periods:** `today` (games today), `week` (last 7 days), `all` (lifetime_xp from user_stats).
+- **Extension:** Set `LEADERBOARD_CHALLENGE_BONUS_HOOK` or add daily challenge logic for extra bonus.
 
 ---
 

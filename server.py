@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from flask import Flask, jsonify, request, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 import os
@@ -12,10 +14,13 @@ from db import (
     get_user_by_username,
     get_progress_summary,
     get_random_word,
+    get_user_leaderboard_rank,
     initialize_and_seed,
     list_global_leaderboard,
+    list_leaderboard_aggregated,
     list_themes,
     theme_display_name,
+    upsert_user_stats_after_game,
 )
 from engine.word_selector import select_guest_word, select_next_word, update_word_progress
 
@@ -272,6 +277,7 @@ def submit_game_result():
 
         progress = None
         leaderboard_entry_id = None
+        rank_info = None
         if user_id:
             progress = update_word_progress(conn, user_id=user_id, word_id=word_id, was_correct=won)
             leaderboard_cursor = conn.execute(
@@ -279,19 +285,24 @@ def submit_game_result():
                 (user_id, game_id, score),
             )
             leaderboard_entry_id = int(leaderboard_cursor.lastrowid)
+            upsert_user_stats_after_game(conn, user_id, score, played_dt=datetime.utcnow())
             conn.commit()
+            rank_info = get_user_leaderboard_rank(DB_PATH, user_id, period='all')
         else:
             conn.commit()
 
-        return jsonify(
-            {
-                'game_id': game_id,
-                'score': score,
-                'accuracy': accuracy,
-                'leaderboard_entry_id': leaderboard_entry_id,
-                'progress': progress,
-            }
-        ), 201
+        payload = {
+            'game_id': game_id,
+            'score': score,
+            'accuracy': accuracy,
+            'leaderboard_entry_id': leaderboard_entry_id,
+            'progress': progress,
+        }
+        if rank_info:
+            payload['rank'] = rank_info['rank']
+            payload['leaderboard_score'] = rank_info['leaderboard_score']
+            payload['current_streak_days'] = rank_info['current_streak_days']
+        return jsonify(payload), 201
     finally:
         conn.close()
 
@@ -307,18 +318,16 @@ def get_progress_summary_route():
 
 @app.route('/api/leaderboard/global')
 def get_global_leaderboard():
-    theme_id = request.args.get('theme', type=int)
+    period = request.args.get('period', default='all', type=str)
+    if period not in ('today', 'week', 'all'):
+        period = 'all'
     limit = request.args.get('limit', default=50, type=int)
+    current_user_id = _current_user_id()
 
-    entries = list_global_leaderboard(DB_PATH, theme_id=theme_id, limit=limit)
-    ranked = [
-        {
-            'rank': index,
-            **entry,
-        }
-        for index, entry in enumerate(entries, start=1)
-    ]
-    return jsonify({'entries': ranked}), 200
+    entries = list_leaderboard_aggregated(
+        DB_PATH, period=period, limit=limit, current_user_id=current_user_id
+    )
+    return jsonify({'entries': entries, 'period': period}), 200
 
 
 

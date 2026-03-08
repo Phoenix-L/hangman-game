@@ -1,9 +1,20 @@
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
 DEFAULT_DB_PATH = "hangman.db"
+
+# --- Leaderboard ranking algorithm (user-aggregated, time-decayed) ---
+# leaderboard_score = decayed_game_sum + streak_bonus + daily_activity_bonus + challenge_bonus_hook
+# - decayed_game_sum: SUM(score * POWER(decay_factor, age_in_days)) over games in period
+# - Older scores diminish over time so new active users can climb; long-inactive users fall.
+# - challenge_bonus_hook: reserved for future daily challenge (0 for now).
+LEADERBOARD_DECAY_FACTOR = 0.94
+LEADERBOARD_STREAK_BONUS_PER_DAY = 8
+LEADERBOARD_STREAK_CAP_DAYS = 30
+LEADERBOARD_DAILY_ACTIVITY_BONUS = 50
+LEADERBOARD_CHALLENGE_BONUS_HOOK = 0  # Extension point for daily challenge
 # By default, seed from top-level txt files in data/.
 # Legacy sources under word/ or data/words/ are intentionally ignored.
 DEFAULT_WORD_DIRS = ("data",)
@@ -195,6 +206,69 @@ def _ensure_user_word_progress_table(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_user_stats_table(conn: sqlite3.Connection) -> None:
+    """User-aggregated stats for leaderboard: one row per user."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_stats (
+            user_id INTEGER PRIMARY KEY,
+            total_games INTEGER NOT NULL DEFAULT 0,
+            total_score INTEGER NOT NULL DEFAULT 0,
+            current_streak_days INTEGER NOT NULL DEFAULT 0,
+            last_played_date TEXT,
+            lifetime_xp REAL NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_user_stats_last_played ON user_stats(last_played_date)"
+    )
+
+
+def _backfill_user_stats(conn: sqlite3.Connection) -> None:
+    """One-time backfill: compute user_stats for users who have games but no row."""
+    user_ids = conn.execute(
+        "SELECT DISTINCT user_id FROM games WHERE user_id IS NOT NULL AND ended_at IS NOT NULL"
+    ).fetchall()
+    for row in user_ids:
+        uid = row[0] if hasattr(row, '__getitem__') else row['user_id']
+        if uid is None:
+            continue
+        user_id = int(uid)
+        exists = conn.execute("SELECT 1 FROM user_stats WHERE user_id = ?", (user_id,)).fetchone()
+        if exists:
+            continue
+        rows = conn.execute(
+            """
+            SELECT score, date(ended_at) AS d
+            FROM games WHERE user_id = ? AND ended_at IS NOT NULL AND score IS NOT NULL
+            ORDER BY d
+            """,
+            (user_id,),
+        ).fetchall()
+        if not rows:
+            continue
+        total_games = len(rows)
+        total_score = sum(int(r["score"]) for r in rows)
+        dates_ordered = [date.fromisoformat(r["d"]) for r in rows]
+        last_d = dates_ordered[-1]
+        streak = 0
+        d = last_d
+        while d in set(dates_ordered):
+            streak += 1
+            d -= timedelta(days=1)
+        lifetime_xp = _compute_decayed_sum([(int(r["score"]), date.fromisoformat(r["d"])) for r in rows], last_d)
+        conn.execute(
+            """
+            INSERT INTO user_stats (user_id, total_games, total_score, current_streak_days, last_played_date, lifetime_xp, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, total_games, total_score, streak, last_d.isoformat(), lifetime_xp, last_d.isoformat()),
+        )
+
+
 def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
     conn = get_connection(db_path)
     try:
@@ -203,6 +277,8 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
         _migrate_legacy_word_progress(conn)
         _ensure_games_columns(conn)
         _ensure_user_word_progress_table(conn)
+        _ensure_user_stats_table(conn)
+        _backfill_user_stats(conn)
         conn.commit()
     finally:
         conn.close()
@@ -531,6 +607,234 @@ def update_user_word_progress(
         return dict(row)
     finally:
         conn.close()
+
+
+def _parse_played_date(played_dt: datetime | date | None) -> date | None:
+    """Normalize to date for streak comparison. Testable."""
+    if played_dt is None:
+        return None
+    if isinstance(played_dt, datetime):
+        return played_dt.date()
+    return played_dt
+
+
+def _streak_after_play(
+    last_played_date: date | None, current_streak_days: int, play_date: date
+) -> int:
+    """
+    Streak rules:
+    - First play ever or gap > 1 day -> 1.
+    - Played yesterday -> streak + 1.
+    - Already played today -> streak unchanged (no double-increment).
+    """
+    if last_played_date is None:
+        return 1
+    delta = (play_date - last_played_date).days
+    if delta == 0:
+        return current_streak_days
+    if delta == 1:
+        return current_streak_days + 1
+    return 1
+
+
+def _compute_decayed_sum(scores_with_dates: list[tuple[int, date]], ref_date: date) -> float:
+    """Sum of score * POWER(decay_factor, age_in_days). Used for lifetime_xp and period windows."""
+    total = 0.0
+    for score_val, end_date in scores_with_dates:
+        age_days = (ref_date - end_date).days
+        if age_days < 0:
+            age_days = 0
+        total += score_val * (LEADERBOARD_DECAY_FACTOR ** age_days)
+    return total
+
+
+def _streak_bonus(streak_days: int) -> float:
+    """min(current_streak_days, 30) * 8."""
+    return min(streak_days, LEADERBOARD_STREAK_CAP_DAYS) * LEADERBOARD_STREAK_BONUS_PER_DAY
+
+
+def _daily_activity_bonus(last_played_date: date | None, ref_date: date) -> float:
+    """50 if user played on ref_date (today), else 0."""
+    if last_played_date is None:
+        return 0.0
+    return float(LEADERBOARD_DAILY_ACTIVITY_BONUS) if last_played_date == ref_date else 0.0
+
+
+def upsert_user_stats_after_game(
+    conn: sqlite3.Connection,
+    user_id: int,
+    game_score: int,
+    played_dt: datetime | date | None = None,
+) -> dict:
+    """
+    Update user_stats after a completed game: total_games, total_score, streak, last_played_date.
+    Recomputes lifetime_xp (decayed sum of all games). Uses played_dt for streak; defaults to now.
+    """
+    now = played_dt or datetime.utcnow()
+    play_date = _parse_played_date(now)
+    if play_date is None:
+        play_date = date.today()
+    date_str = play_date.isoformat()
+
+    row = conn.execute(
+        "SELECT total_games, total_score, current_streak_days, last_played_date FROM user_stats WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+
+    if row is None:
+        conn.execute(
+            """
+            INSERT INTO user_stats (user_id, total_games, total_score, current_streak_days, last_played_date, lifetime_xp, updated_at)
+            VALUES (?, 1, ?, 1, ?, ?, ?)
+            """,
+            (user_id, game_score, date_str, float(game_score), date_str),
+        )
+        return {
+            "user_id": user_id,
+            "total_games": 1,
+            "total_score": game_score,
+            "current_streak_days": 1,
+            "last_played_date": date_str,
+            "lifetime_xp": float(game_score),
+        }
+    total_games = int(row["total_games"]) + 1
+    total_score = int(row["total_score"]) + game_score
+    last_played = row["last_played_date"]
+    last_date = date.fromisoformat(last_played) if last_played else None
+    current_streak = int(row["current_streak_days"])
+    new_streak = _streak_after_play(last_date, current_streak, play_date)
+
+    # Recompute lifetime_xp from all games (decayed sum)
+    games_rows = conn.execute(
+        """
+        SELECT g.score, date(g.ended_at) AS d
+        FROM games g
+        WHERE g.user_id = ? AND g.ended_at IS NOT NULL AND g.score IS NOT NULL
+        """,
+        (user_id,),
+    ).fetchall()
+    scores_with_dates = [(int(r["score"]), date.fromisoformat(r["d"])) for r in games_rows]
+    lifetime_xp = _compute_decayed_sum(scores_with_dates, play_date)
+
+    conn.execute(
+        """
+        UPDATE user_stats
+        SET total_games = ?, total_score = ?, current_streak_days = ?, last_played_date = ?, lifetime_xp = ?, updated_at = ?
+        WHERE user_id = ?
+        """,
+        (total_games, total_score, new_streak, date_str, lifetime_xp, date_str, user_id),
+    )
+    return {
+        "user_id": user_id,
+        "total_games": total_games,
+        "total_score": total_score,
+        "current_streak_days": new_streak,
+        "last_played_date": date_str,
+        "lifetime_xp": lifetime_xp,
+    }
+
+
+def list_leaderboard_aggregated(
+    db_path: str,
+    *,
+    period: str = "all",
+    limit: int = 50,
+    ref_date: date | None = None,
+    current_user_id: int | None = None,
+) -> list[dict]:
+    """
+    Per-user leaderboard with aggregated score. One row per user.
+    leaderboard_score = decayed_sum + streak_bonus + daily_activity_bonus + challenge_bonus_hook.
+    period: 'today' | 'week' | 'all'. ref_date: reference date for decay/today (default today).
+    """
+    ref = ref_date or date.today()
+    limit = max(1, min(100, int(limit)))
+    conn = get_connection(db_path)
+    try:
+        # All users who have user_stats (have played at least one game)
+        stats_rows = conn.execute(
+            """
+            SELECT s.user_id, u.username,
+                   s.total_games, s.total_score, s.current_streak_days, s.last_played_date, s.lifetime_xp
+            FROM user_stats s
+            JOIN users u ON u.id = s.user_id
+            """
+        ).fetchall()
+
+        ref_ts = ref.isoformat()
+        ref_week_start = (ref - timedelta(days=ref.weekday())).isoformat() if period == "week" else None
+        # For week we use last 7 days from ref
+        week_start_date = ref - timedelta(days=6) if period == "week" else None
+
+        scores_list: list[tuple[int, str, float, int, str | None]] = []
+
+        for row in stats_rows:
+            user_id = int(row["user_id"])
+            username = row["username"] or "Guest"
+            streak_days = int(row["current_streak_days"])
+            last_played = row["last_played_date"]
+            last_played_date = date.fromisoformat(last_played) if last_played else None
+
+            if period == "all":
+                decayed_sum = float(row["lifetime_xp"])
+            else:
+                if period == "today":
+                    games_sql = """
+                        SELECT score, date(ended_at) AS d FROM games
+                        WHERE user_id = ? AND ended_at IS NOT NULL AND score IS NOT NULL
+                        AND date(ended_at) = ?
+                    """
+                    games_params = (user_id, ref_ts)
+                else:
+                    games_sql = """
+                        SELECT score, date(ended_at) AS d FROM games
+                        WHERE user_id = ? AND ended_at IS NOT NULL AND score IS NOT NULL
+                        AND date(ended_at) >= ?
+                    """
+                    games_params = (user_id, week_start_date.isoformat())
+                game_rows = conn.execute(games_sql, games_params).fetchall()
+                scores_with_dates = [(int(r["score"]), date.fromisoformat(r["d"])) for r in game_rows]
+                decayed_sum = _compute_decayed_sum(scores_with_dates, ref)
+
+            streak_b = _streak_bonus(streak_days)
+            daily_b = _daily_activity_bonus(last_played_date, ref)
+            challenge_b = LEADERBOARD_CHALLENGE_BONUS_HOOK
+            leaderboard_score = decayed_sum + streak_b + daily_b + challenge_b
+            scores_list.append((user_id, username, leaderboard_score, streak_days, last_played))
+
+        scores_list.sort(key=lambda x: -x[2])
+        entries = []
+        for rank, (uid, uname, lb_score, streak, last_active) in enumerate(scores_list[:limit], start=1):
+            entries.append({
+                "user_id": uid,
+                "username": uname,
+                "rank": rank,
+                "leaderboard_score": round(lb_score, 1),
+                "current_streak_days": streak,
+                "last_active": last_active,
+                "is_current_user": current_user_id is not None and uid == current_user_id,
+            })
+        return entries
+    finally:
+        conn.close()
+
+
+def get_user_leaderboard_rank(
+    db_path: str, user_id: int, *, period: str = "all", ref_date: date | None = None
+) -> dict | None:
+    """Return rank, leaderboard_score, current_streak_days for user in the aggregated leaderboard."""
+    entries = list_leaderboard_aggregated(
+        db_path, period=period, limit=500, ref_date=ref_date, current_user_id=user_id
+    )
+    for e in entries:
+        if e["user_id"] == user_id:
+            return {
+                "rank": e["rank"],
+                "leaderboard_score": e["leaderboard_score"],
+                "current_streak_days": e["current_streak_days"],
+                "last_active": e["last_active"],
+            }
+    return None
 
 
 def list_global_leaderboard(db_path: str, *, theme_id: int | None = None, limit: int = 50) -> list[dict]:
