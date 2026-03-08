@@ -182,8 +182,8 @@ The backend now includes `engine/word_selector.py` with the interface:
 
 Selection order for authenticated users:
 
-1. due review words (`next_review_at <= now`)
-2. high-mistake words (`times_wrong` descending)
+1. due review words (`next_review <= now`)
+2. difficult words (high wrong count / fail-rate)
 3. unseen/new words
 4. fallback random word in theme
 
@@ -197,10 +197,11 @@ Guest mode behavior:
 ### New API endpoint
 
 - `GET /api/word/next?theme=<theme_id>`
-  - Auth user: history/spaced-repetition aware selection
+  - Auth user: learning-priority selection (review -> difficult -> new -> fallback)
   - Guest: random in theme
+  - Response includes `review_status` in `{ "review", "difficult", "new", "random_fallback", "guest_random" }`
 - `POST /api/word/progress` (auth only) with `{ "word_id": <int>, "was_correct": <bool> }`
-  - updates `times_seen`, `times_correct`, `times_wrong`, `last_seen_at`, `interval_days`, `next_review_at`
+  - updates `user_word_progress` using a simplified SM-2-like rule
 
 ## Manual game-result + leaderboard flow
 
@@ -242,3 +243,13 @@ Guest mode behavior:
   - streak days
 - Use **Share Progress Card** to generate a PNG card in-browser (Canvas) and download it for social sharing.
 - Mastery rule used by backend summary: `times_correct >= 3` and `interval_days >= 7`.
+
+
+## Learning engine scheduling model
+
+For authenticated users, the engine stores per-user/per-word state in `user_word_progress` and applies:
+
+- **Correct outcome**: `correct_count += 1`, `ease_factor += 0.05` (max 3.0), `interval = round(interval * ease_factor)`, `next_review = now + interval days`
+- **Incorrect outcome**: `wrong_count += 1`, `ease_factor -= 0.2` (min 1.3), `interval = 1`, `next_review = now + 1 day`
+
+This enables due-review prioritization and difficult-word resurfacing without changing frontend gameplay flow.

@@ -13,14 +13,8 @@ class SelectionResult:
     reason: str
 
 
-def _iso_now(now: datetime | None = None) -> str:
-    return (now or datetime.utcnow()).replace(microsecond=0).isoformat(sep=' ')
-
-
-def _to_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    return datetime.fromisoformat(value)
+def _to_db_ts(value: datetime | None = None) -> str:
+    return (value or datetime.utcnow()).replace(microsecond=0).isoformat(sep=' ')
 
 
 def _recent_word_ids(conn: sqlite3.Connection, user_id: int, limit: int) -> list[int]:
@@ -34,81 +28,110 @@ def _recent_word_ids(conn: sqlite3.Connection, user_id: int, limit: int) -> list
         """,
         (user_id, limit),
     ).fetchall()
-    return [int(row["word_id"]) for row in rows]
+    return [int(row['word_id']) for row in rows]
 
 
-def _mastered_today_word_ids(conn: sqlite3.Connection, user_id: int, now: datetime | None = None) -> list[int]:
-    """Return word_ids the user has already mastered today (completed game with wrong_guesses < 3)."""
-    now = now or datetime.utcnow()
-    today = now.strftime("%Y-%m-%d")
-    rows = conn.execute(
-        """
-        SELECT DISTINCT word_id
-        FROM games
-        WHERE user_id = ? AND ended_at IS NOT NULL AND date(ended_at) = date(?)
-          AND wrong_guesses < 3 AND word_id IS NOT NULL
-        """,
-        (user_id, today),
-    ).fetchall()
-    return [int(row["word_id"]) for row in rows]
+def _excluded_clause(excluded_word_ids: list[int]) -> tuple[str, list[int]]:
+    if not excluded_word_ids:
+        return "", []
+    placeholders = ','.join('?' for _ in excluded_word_ids)
+    return f" AND w.id NOT IN ({placeholders})", excluded_word_ids
 
 
-def _fetch_candidates(conn: sqlite3.Connection, theme_id: int, excluded_word_ids: list[int]) -> list[sqlite3.Row]:
-    if excluded_word_ids:
-        placeholders = ','.join('?' for _ in excluded_word_ids)
-        query = f"SELECT id, theme_id, value FROM words WHERE theme_id = ? AND id NOT IN ({placeholders})"
-        return conn.execute(query, (theme_id, *excluded_word_ids)).fetchall()
+def select_due_review_words(
+    conn: sqlite3.Connection,
+    user_id: int,
+    theme_id: int,
+    *,
+    excluded_word_ids: list[int] | None = None,
+    now: datetime | None = None,
+    limit: int = 50,
+) -> list[sqlite3.Row]:
+    excluded_word_ids = excluded_word_ids or []
+    excluded_sql, excluded_params = _excluded_clause(excluded_word_ids)
+    now_text = _to_db_ts(now)
     return conn.execute(
-        "SELECT id, theme_id, value FROM words WHERE theme_id = ?",
-        (theme_id,),
+        f"""
+        SELECT w.id, w.theme_id, w.value,
+               p.correct_count, p.wrong_count,
+               p.last_seen, p.next_review, p.ease_factor, p.interval
+        FROM words w
+        JOIN user_word_progress p ON p.word_id = w.id AND p.user_id = ?
+        WHERE w.theme_id = ?
+          AND p.next_review IS NOT NULL
+          AND p.next_review <= ?
+          {excluded_sql}
+        ORDER BY p.next_review ASC,
+                 (p.wrong_count - p.correct_count) DESC,
+                 w.id ASC
+        LIMIT ?
+        """,
+        (user_id, theme_id, now_text, *excluded_params, limit),
     ).fetchall()
 
 
-def _pick_due(conn: sqlite3.Connection, user_id: int, theme_id: int, excluded_word_ids: list[int], now_text: str) -> sqlite3.Row | None:
-    base = """
-        SELECT w.id, w.theme_id, w.value, p.next_review_at, p.times_wrong
+def select_difficult_words(
+    conn: sqlite3.Connection,
+    user_id: int,
+    theme_id: int,
+    *,
+    excluded_word_ids: list[int] | None = None,
+    now: datetime | None = None,
+    limit: int = 50,
+) -> list[sqlite3.Row]:
+    """Words with poor history that are not due yet become secondary priority."""
+    excluded_word_ids = excluded_word_ids or []
+    excluded_sql, excluded_params = _excluded_clause(excluded_word_ids)
+    now_text = _to_db_ts(now)
+    return conn.execute(
+        f"""
+        SELECT w.id, w.theme_id, w.value,
+               p.correct_count, p.wrong_count,
+               p.last_seen, p.next_review, p.ease_factor, p.interval,
+               CASE
+                   WHEN (p.correct_count + p.wrong_count) = 0 THEN 0.0
+                   ELSE (p.wrong_count * 1.0) / (p.correct_count + p.wrong_count)
+               END AS fail_rate
         FROM words w
-        JOIN word_progress p ON p.word_id = w.id AND p.user_id = ?
-        WHERE w.theme_id = ? AND p.times_seen > 0 AND p.next_review_at IS NOT NULL AND p.next_review_at <= ?
-    """
-    params: list[Any] = [user_id, theme_id, now_text]
-    if excluded_word_ids:
-        placeholders = ','.join('?' for _ in excluded_word_ids)
-        base += f" AND w.id NOT IN ({placeholders})"
-        params.extend(excluded_word_ids)
-    base += " ORDER BY p.next_review_at ASC, p.times_wrong DESC, w.id ASC LIMIT 1"
-    return conn.execute(base, params).fetchone()
+        JOIN user_word_progress p ON p.word_id = w.id AND p.user_id = ?
+        WHERE w.theme_id = ?
+          AND p.wrong_count > 0
+          AND (p.next_review IS NULL OR p.next_review > ?)
+          {excluded_sql}
+        ORDER BY fail_rate DESC,
+                 p.wrong_count DESC,
+                 p.last_seen ASC,
+                 w.id ASC
+        LIMIT ?
+        """,
+        (user_id, theme_id, now_text, *excluded_params, limit),
+    ).fetchall()
 
 
-def _pick_missed(conn: sqlite3.Connection, user_id: int, theme_id: int, excluded_word_ids: list[int]) -> sqlite3.Row | None:
-    base = """
-        SELECT w.id, w.theme_id, w.value, p.times_wrong, p.last_seen_at
-        FROM words w
-        JOIN word_progress p ON p.word_id = w.id AND p.user_id = ?
-        WHERE w.theme_id = ? AND p.times_wrong > 0
-    """
-    params: list[Any] = [user_id, theme_id]
-    if excluded_word_ids:
-        placeholders = ','.join('?' for _ in excluded_word_ids)
-        base += f" AND w.id NOT IN ({placeholders})"
-        params.extend(excluded_word_ids)
-    base += " ORDER BY p.times_wrong DESC, p.last_seen_at ASC, w.id ASC LIMIT 1"
-    return conn.execute(base, params).fetchone()
-
-
-def _pick_new(conn: sqlite3.Connection, user_id: int, theme_id: int, excluded_word_ids: list[int], rng: random.Random) -> sqlite3.Row | None:
-    base = """
+def select_new_words(
+    conn: sqlite3.Connection,
+    user_id: int,
+    theme_id: int,
+    *,
+    excluded_word_ids: list[int] | None = None,
+) -> list[sqlite3.Row]:
+    excluded_word_ids = excluded_word_ids or []
+    excluded_sql, excluded_params = _excluded_clause(excluded_word_ids)
+    return conn.execute(
+        f"""
         SELECT w.id, w.theme_id, w.value
         FROM words w
-        LEFT JOIN word_progress p ON p.word_id = w.id AND p.user_id = ?
-        WHERE w.theme_id = ? AND (p.word_id IS NULL OR p.times_seen = 0)
-    """
-    params: list[Any] = [user_id, theme_id]
-    if excluded_word_ids:
-        placeholders = ','.join('?' for _ in excluded_word_ids)
-        base += f" AND w.id NOT IN ({placeholders})"
-        params.extend(excluded_word_ids)
-    rows = conn.execute(base, params).fetchall()
+        LEFT JOIN user_word_progress p ON p.word_id = w.id AND p.user_id = ?
+        WHERE w.theme_id = ?
+          AND p.word_id IS NULL
+          {excluded_sql}
+        ORDER BY w.id ASC
+        """,
+        (user_id, theme_id, *excluded_params),
+    ).fetchall()
+
+
+def _pick_random(rows: list[sqlite3.Row], rng: random.Random) -> sqlite3.Row | None:
     if not rows:
         return None
     return rows[rng.randrange(len(rows))]
@@ -123,30 +146,35 @@ def select_next_word(
     now: datetime | None = None,
     rng: random.Random | None = None,
 ) -> SelectionResult:
+    """
+    Selection priority:
+    1) due review 2) difficult 3) unseen/new 4) random fallback.
+    """
     rng = rng or random.Random()
-    now_text = _iso_now(now)
+    excluded_word_ids = _recent_word_ids(conn, user_id, recent_games_limit)
 
-    recent_ids = _recent_word_ids(conn, user_id, recent_games_limit)
-    mastered_today_ids = _mastered_today_word_ids(conn, user_id, now)
-    excluded_word_ids = list(dict.fromkeys(recent_ids + mastered_today_ids))
-
-    due = _pick_due(conn, user_id, theme_id, excluded_word_ids, now_text)
+    due = select_due_review_words(conn, user_id, theme_id, excluded_word_ids=excluded_word_ids, now=now, limit=1)
     if due:
-        return SelectionResult(word=dict(due), reason='due_review')
+        return SelectionResult(word=dict(due[0]), reason='review')
 
-    missed = _pick_missed(conn, user_id, theme_id, excluded_word_ids)
-    if missed:
-        return SelectionResult(word=dict(missed), reason='high_mistake')
+    difficult = select_difficult_words(conn, user_id, theme_id, excluded_word_ids=excluded_word_ids, now=now, limit=1)
+    if difficult:
+        return SelectionResult(word=dict(difficult[0]), reason='difficult')
 
-    new_word = _pick_new(conn, user_id, theme_id, excluded_word_ids, rng)
-    if new_word:
-        return SelectionResult(word=dict(new_word), reason='new_word')
+    new_words = select_new_words(conn, user_id, theme_id, excluded_word_ids=excluded_word_ids)
+    picked_new = _pick_random(new_words, rng)
+    if picked_new:
+        return SelectionResult(word=dict(picked_new), reason='new')
 
-    fallback_candidates = _fetch_candidates(conn, theme_id, excluded_word_ids)
-    if not fallback_candidates:
-        return SelectionResult(word=None, reason='no_words')
-    picked = fallback_candidates[rng.randrange(len(fallback_candidates))]
-    return SelectionResult(word=dict(picked), reason='fallback_random')
+    excluded_sql, excluded_params = _excluded_clause(excluded_word_ids)
+    fallback_rows = conn.execute(
+        f"SELECT w.id, w.theme_id, w.value FROM words w WHERE w.theme_id = ? {excluded_sql}",
+        (theme_id, *excluded_params),
+    ).fetchall()
+    fallback = _pick_random(fallback_rows, rng)
+    if fallback:
+        return SelectionResult(word=dict(fallback), reason='random_fallback')
+    return SelectionResult(word=None, reason='no_words')
 
 
 def select_guest_word(conn: sqlite3.Connection, theme_id: int, rng: random.Random | None = None) -> SelectionResult:
@@ -155,9 +183,10 @@ def select_guest_word(conn: sqlite3.Connection, theme_id: int, rng: random.Rando
         "SELECT id, theme_id, value FROM words WHERE theme_id = ?",
         (theme_id,),
     ).fetchall()
-    if not rows:
+    picked = _pick_random(rows, rng)
+    if not picked:
         return SelectionResult(word=None, reason='no_words')
-    return SelectionResult(word=dict(rows[rng.randrange(len(rows))]), reason='guest_random')
+    return SelectionResult(word=dict(picked), reason='guest_random')
 
 
 def update_word_progress(
@@ -168,32 +197,82 @@ def update_word_progress(
     was_correct: bool,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    """
+    Simplified SM-2-like scheduling:
+    - correct: interval grows by ease_factor; ease_factor nudges up (+0.05)
+    - incorrect: interval resets to 1 day; ease_factor nudges down (-0.2)
+    - ease_factor is clamped to [1.3, 3.0]
+    """
     now_dt = (now or datetime.utcnow()).replace(microsecond=0)
-    now_text = now_dt.isoformat(sep=' ')
 
-    existing = conn.execute(
+    row = conn.execute(
         """
-        SELECT user_id, word_id, times_seen, times_correct, times_wrong, last_seen_at,
-               interval_days, next_review_at
-        FROM word_progress
+        SELECT correct_count, wrong_count, ease_factor, interval
+        FROM user_word_progress
         WHERE user_id = ? AND word_id = ?
         """,
         (user_id, word_id),
     ).fetchone()
 
-    if existing:
-        times_seen = int(existing['times_seen']) + 1
-        times_correct = int(existing['times_correct']) + (1 if was_correct else 0)
-        times_wrong = int(existing['times_wrong']) + (0 if was_correct else 1)
-        previous_interval = int(existing['interval_days'] or 1)
+    if row is None:
+        correct_count = 0
+        wrong_count = 0
+        ease_factor = 2.5
+        interval_days = 1
+        conn.execute(
+            "INSERT INTO user_word_progress (user_id, word_id) VALUES (?, ?)",
+            (user_id, word_id),
+        )
     else:
+        correct_count = int(row['correct_count'])
+        wrong_count = int(row['wrong_count'])
+        ease_factor = float(row['ease_factor'] or 2.5)
+        interval_days = int(row['interval'] or 1)
+
+    if was_correct:
+        correct_count += 1
+        ease_factor = min(3.0, ease_factor + 0.05)
+        interval_days = max(1, int(round(interval_days * ease_factor)))
+    else:
+        wrong_count += 1
+        ease_factor = max(1.3, ease_factor - 0.2)
+        interval_days = 1
+
+    last_seen = _to_db_ts(now_dt)
+    next_review = _to_db_ts(now_dt + timedelta(days=interval_days))
+
+    conn.execute(
+        """
+        UPDATE user_word_progress
+        SET correct_count = ?,
+            wrong_count = ?,
+            last_seen = ?,
+            next_review = ?,
+            ease_factor = ?,
+            interval = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND word_id = ?
+        """,
+        (correct_count, wrong_count, last_seen, next_review, ease_factor, interval_days, user_id, word_id),
+    )
+
+    # Keep legacy summary/dashboard behavior working for now.
+    legacy = conn.execute(
+        """
+        SELECT times_seen, times_correct, times_wrong
+        FROM word_progress
+        WHERE user_id = ? AND word_id = ?
+        """,
+        (user_id, word_id),
+    ).fetchone()
+    if legacy is None:
         times_seen = 1
         times_correct = 1 if was_correct else 0
         times_wrong = 0 if was_correct else 1
-        previous_interval = 1
-
-    interval_days = min(30, max(1, previous_interval * 2)) if was_correct else 1
-    next_review_at = (now_dt + timedelta(days=interval_days)).isoformat(sep=' ')
+    else:
+        times_seen = int(legacy['times_seen']) + 1
+        times_correct = int(legacy['times_correct']) + (1 if was_correct else 0)
+        times_wrong = int(legacy['times_wrong']) + (0 if was_correct else 1)
 
     conn.execute(
         """
@@ -209,26 +288,22 @@ def update_word_progress(
             interval_days = excluded.interval_days,
             next_review_at = excluded.next_review_at
         """,
-        (
-            user_id,
-            word_id,
-            times_seen,
-            times_correct,
-            times_wrong,
-            now_text,
-            interval_days,
-            next_review_at,
-        ),
+        (user_id, word_id, times_seen, times_correct, times_wrong, last_seen, interval_days, next_review),
     )
-    conn.commit()
 
     return {
         'user_id': user_id,
         'word_id': word_id,
+        'correct_count': correct_count,
+        'wrong_count': wrong_count,
+        'last_seen': last_seen,
+        'next_review': next_review,
+        'ease_factor': round(ease_factor, 4),
+        'interval': interval_days,
+        # legacy mirrors
         'times_seen': times_seen,
         'times_correct': times_correct,
         'times_wrong': times_wrong,
-        'last_seen_at': now_text,
         'interval_days': interval_days,
-        'next_review_at': next_review_at,
+        'next_review_at': next_review,
     }

@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Iterable
 
 DEFAULT_DB_PATH = "hangman.db"
 # By default, seed from top-level txt files in data/.
@@ -76,6 +77,29 @@ CREATE TABLE IF NOT EXISTS leaderboard_entries (
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY(game_id) REFERENCES games(id) ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS user_word_progress (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    word_id INTEGER NOT NULL,
+    correct_count INTEGER NOT NULL DEFAULT 0,
+    wrong_count INTEGER NOT NULL DEFAULT 0,
+    last_seen TEXT,
+    next_review TEXT,
+    ease_factor REAL NOT NULL DEFAULT 2.5,
+    interval INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, word_id),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_word_progress_next_review
+ON user_word_progress(next_review);
+
+CREATE INDEX IF NOT EXISTS idx_user_word_progress_user_id
+ON user_word_progress(user_id);
 """
 
 
@@ -136,6 +160,41 @@ def _ensure_games_columns(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE games ADD COLUMN {column_name} {column_type}")
 
 
+def _ensure_user_word_progress_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_word_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            word_id INTEGER NOT NULL,
+            correct_count INTEGER NOT NULL DEFAULT 0,
+            wrong_count INTEGER NOT NULL DEFAULT 0,
+            last_seen TEXT,
+            next_review TEXT,
+            ease_factor REAL NOT NULL DEFAULT 2.5,
+            interval INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, word_id),
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_user_word_progress_next_review
+        ON user_word_progress(next_review)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_user_word_progress_user_id
+        ON user_word_progress(user_id)
+        """
+    )
+
+
 def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
     conn = get_connection(db_path)
     try:
@@ -143,6 +202,7 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
         _ensure_users_password_hash_column(conn)
         _migrate_legacy_word_progress(conn)
         _ensure_games_columns(conn)
+        _ensure_user_word_progress_table(conn)
         conn.commit()
     finally:
         conn.close()
@@ -337,6 +397,138 @@ def create_leaderboard_entry(db_path: str, user_id: int, score: int, game_id: in
         )
         conn.commit()
         return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
+def get_user_word_progress(db_path: str, user_id: int, word_id: int) -> dict | None:
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT id,
+                   user_id,
+                   word_id,
+                   correct_count,
+                   wrong_count,
+                   last_seen,
+                   next_review,
+                   ease_factor,
+                   interval,
+                   created_at,
+                   updated_at
+            FROM user_word_progress
+            WHERE user_id = ? AND word_id = ?
+            """,
+            (user_id, word_id),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def create_user_word_progress(db_path: str, user_id: int, word_id: int) -> dict:
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO user_word_progress (user_id, word_id)
+            VALUES (?, ?)
+            """,
+            (user_id, word_id),
+        )
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT id,
+                   user_id,
+                   word_id,
+                   correct_count,
+                   wrong_count,
+                   last_seen,
+                   next_review,
+                   ease_factor,
+                   interval,
+                   created_at,
+                   updated_at
+            FROM user_word_progress
+            WHERE user_id = ? AND word_id = ?
+            """,
+            (user_id, word_id),
+        ).fetchone()
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def update_user_word_progress(
+    db_path: str,
+    user_id: int,
+    word_id: int,
+    *,
+    correct_count: int | None = None,
+    wrong_count: int | None = None,
+    last_seen: str | None = None,
+    next_review: str | None = None,
+    ease_factor: float | None = None,
+    interval: int | None = None,
+) -> dict:
+    updates: dict[str, object] = {}
+    if correct_count is not None:
+        updates["correct_count"] = correct_count
+    if wrong_count is not None:
+        updates["wrong_count"] = wrong_count
+    if last_seen is not None:
+        updates["last_seen"] = last_seen
+    if next_review is not None:
+        updates["next_review"] = next_review
+    if ease_factor is not None:
+        updates["ease_factor"] = ease_factor
+    if interval is not None:
+        updates["interval"] = interval
+
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO user_word_progress (user_id, word_id)
+            VALUES (?, ?)
+            """,
+            (user_id, word_id),
+        )
+
+        if updates:
+            assignments = ", ".join([f"{column} = ?" for column in updates])
+            values = [*updates.values(), user_id, word_id]
+            conn.execute(
+                f"""
+                UPDATE user_word_progress
+                SET {assignments}, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND word_id = ?
+                """,
+                values,
+            )
+
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT id,
+                   user_id,
+                   word_id,
+                   correct_count,
+                   wrong_count,
+                   last_seen,
+                   next_review,
+                   ease_factor,
+                   interval,
+                   created_at,
+                   updated_at
+            FROM user_word_progress
+            WHERE user_id = ? AND word_id = ?
+            """,
+            (user_id, word_id),
+        ).fetchone()
+        return dict(row)
     finally:
         conn.close()
 

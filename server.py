@@ -101,9 +101,11 @@ def get_next_word():
         theme_name = get_theme_name_by_id(DB_PATH, selection.word['theme_id']) or 'Vocabulary'
         return jsonify({
             'word': selection.word,
+            'word_text': selection.word.get('value') if selection.word else None,
             'theme': theme_name,
             'theme_display': theme_display_name(theme_name),
             'reason': selection.reason,
+            'review_status': selection.reason,
         })
     finally:
         conn.close()
@@ -125,6 +127,7 @@ def record_progress():
     conn = get_connection(DB_PATH)
     try:
         progress = update_word_progress(conn, user_id=user_id, word_id=word_id, was_correct=was_correct)
+        conn.commit()
         return jsonify({'progress': progress}), 200
     finally:
         conn.close()

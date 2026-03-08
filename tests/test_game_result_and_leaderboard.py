@@ -23,7 +23,7 @@ def seeded_client(tmp_path, monkeypatch):
     (words_dir / 'ket.txt').write_text('cat\ndog\n', encoding='utf-8')
 
     init_db(str(db_path))
-    seed_words_from_files(str(db_path), data_dir=str(words_dir))
+    seed_words_from_files(str(db_path), source_dirs=[str(words_dir)])
 
     monkeypatch.setattr(server, 'DB_PATH', str(db_path))
     server.app.config['TESTING'] = True
@@ -35,7 +35,7 @@ def seeded_client(tmp_path, monkeypatch):
 def _theme_and_word(db_path: str) -> tuple[int, int]:
     conn = get_connection(db_path)
     try:
-        theme_id = conn.execute("SELECT id FROM themes WHERE name='ket'").fetchone()['id']
+        theme_id = conn.execute("SELECT id FROM themes WHERE name='KET'").fetchone()['id']
         word_id = conn.execute("SELECT id FROM words WHERE theme_id = ? ORDER BY id LIMIT 1", (theme_id,)).fetchone()['id']
         return theme_id, word_id
     finally:
@@ -77,6 +77,15 @@ def test_game_result_scoring_server_side_for_authenticated_user(seeded_client):
 
         leaderboard_count = conn.execute('SELECT COUNT(*) AS c FROM leaderboard_entries').fetchone()['c']
         assert leaderboard_count == 1
+
+        progress_row = conn.execute(
+            'SELECT correct_count, wrong_count, interval, next_review FROM user_word_progress WHERE user_id = ? AND word_id = ?',
+            (game_row['user_id'], game_row['word_id']),
+        ).fetchone()
+        assert progress_row is not None
+        assert progress_row['correct_count'] == 1
+        assert progress_row['wrong_count'] == 0
+        assert progress_row['interval'] >= 2
     finally:
         conn.close()
 
