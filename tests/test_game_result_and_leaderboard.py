@@ -7,11 +7,15 @@ from db import get_connection, init_db, seed_words_from_files
 pytest.importorskip('flask')
 
 
-def _expected_score(duration_ms: int, correct: int, wrong: int, won: bool) -> int:
+def _expected_score(duration_ms: int, correct: int, wrong: int, won: bool, review_status: str = 'new') -> int:
     total = correct + wrong
     accuracy = (correct / total) if total > 0 else 0.0
-    speed_factor = 1.0 - (min(max(duration_ms, 0), 120_000) / 120_000)
-    return int(round((accuracy * 700) + (speed_factor * 300) + (100 if won else 0)))
+
+    completion_score = 20 if won else 8
+    accuracy_bonus = 15 if accuracy >= 0.90 else (10 if accuracy >= 0.75 else (6 if accuracy >= 0.60 else 0))
+    speed_bonus = 8 if duration_ms <= 10_000 else (5 if duration_ms <= 20_000 else (2 if duration_ms <= 30_000 else 0))
+    learning_bonus = {'new': 4, 'review': 6, 'difficult': 8}.get(review_status, 4)
+    return max(0, min(60, completion_score + accuracy_bonus + speed_bonus + learning_bonus))
 
 
 @pytest.fixture()
@@ -55,12 +59,13 @@ def test_game_result_scoring_server_side_for_authenticated_user(seeded_client):
         'duration_ms': 10_000,
         'guesses': {'correct': 5, 'wrong': 1},
         'won': True,
+        'review_status': 'new',
     }
     response = client.post('/api/game/result', json=payload)
     assert response.status_code == 201
 
     body = response.get_json()
-    assert body['score'] == _expected_score(10_000, 5, 1, True)
+    assert body['score'] == _expected_score(10_000, 5, 1, True, 'new')
     assert body['leaderboard_entry_id'] is not None
     assert body['progress']['times_seen'] == 1
     assert body['progress']['times_correct'] == 1
@@ -102,6 +107,7 @@ def test_game_result_guest_does_not_create_leaderboard_entry(seeded_client):
             'duration_ms': 30_000,
             'guesses': {'correct': 2, 'wrong': 4},
             'won': False,
+            'review_status': 'review',
         },
     )
     assert response.status_code == 201
@@ -131,6 +137,7 @@ def test_global_leaderboard_orders_by_score_desc(seeded_client):
             'duration_ms': 50_000,
             'guesses': {'correct': 3, 'wrong': 3},
             'won': True,
+            'review_status': 'new',
         },
     )
     assert r1.status_code == 201
@@ -147,6 +154,7 @@ def test_global_leaderboard_orders_by_score_desc(seeded_client):
             'duration_ms': 5_000,
             'guesses': {'correct': 5, 'wrong': 0},
             'won': True,
+            'review_status': 'difficult',
         },
     )
     assert r2.status_code == 201
@@ -169,3 +177,33 @@ def test_global_leaderboard_orders_by_score_desc(seeded_client):
     guest_client = importlib.import_module('server').app.test_client()
     guest_restricted = guest_client.post('/api/leaderboard_entries', json={'score': 99})
     assert guest_restricted.status_code == 401
+
+
+def test_game_score_is_clamped_to_lightweight_range(seeded_client):
+    client, db_path = seeded_client
+    signup = client.post('/api/auth/signup', json={'username': 'range_user', 'password': 'secret123'})
+    assert signup.status_code == 201
+
+    theme_id, word_id = _theme_and_word(db_path)
+
+    high = client.post('/api/game/result', json={
+        'word_id': word_id,
+        'theme_id': theme_id,
+        'duration_ms': 1,
+        'guesses': {'correct': 10, 'wrong': 0},
+        'won': True,
+        'review_status': 'difficult',
+    })
+    assert high.status_code == 201
+    assert 0 <= high.get_json()['score'] <= 60
+
+    low = client.post('/api/game/result', json={
+        'word_id': word_id,
+        'theme_id': theme_id,
+        'duration_ms': 120_000,
+        'guesses': {'correct': 0, 'wrong': 6},
+        'won': False,
+        'review_status': 'new',
+    })
+    assert low.status_code == 201
+    assert 0 <= low.get_json()['score'] <= 60

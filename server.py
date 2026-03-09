@@ -32,14 +32,45 @@ DB_PATH = os.environ.get('HANGMAN_DB_PATH', DEFAULT_DB_PATH)
 initialize_and_seed(DB_PATH)
 
 
-def _compute_accuracy_and_score(duration_ms: int, correct_guesses: int, wrong_guesses: int, won: bool) -> tuple[float, int]:
+def _compute_accuracy_and_score(
+    duration_ms: int,
+    correct_guesses: int,
+    wrong_guesses: int,
+    won: bool,
+    review_status: str | None = None,
+) -> tuple[float, int]:
     total_guesses = correct_guesses + wrong_guesses
     accuracy = (correct_guesses / total_guesses) if total_guesses > 0 else 0.0
 
-    clamped_duration = min(max(duration_ms, 0), 120_000)
-    speed_factor = 1.0 - (clamped_duration / 120_000)
-    won_bonus = 100 if won else 0
-    score = int(round((accuracy * 700) + (speed_factor * 300) + won_bonus))
+    completion_score = 20 if won else 8
+
+    if accuracy >= 0.90:
+        accuracy_bonus = 15
+    elif accuracy >= 0.75:
+        accuracy_bonus = 10
+    elif accuracy >= 0.60:
+        accuracy_bonus = 6
+    else:
+        accuracy_bonus = 0
+
+    if duration_ms <= 10_000:
+        speed_bonus = 8
+    elif duration_ms <= 20_000:
+        speed_bonus = 5
+    elif duration_ms <= 30_000:
+        speed_bonus = 2
+    else:
+        speed_bonus = 0
+
+    learning_bonus_map = {
+        'new': 4,
+        'review': 6,
+        'difficult': 8,
+    }
+    learning_bonus = learning_bonus_map.get((review_status or 'new').lower(), 4)
+
+    score = completion_score + accuracy_bonus + speed_bonus + learning_bonus
+    score = max(0, min(60, int(score)))
     return accuracy, score
 
 
@@ -218,9 +249,12 @@ def submit_game_result():
     duration_ms = payload.get('duration_ms')
     guesses = payload.get('guesses') if isinstance(payload.get('guesses'), dict) else None
     won = payload.get('won')
+    review_status = payload.get('review_status')
 
     if not isinstance(word_id, int) or not isinstance(theme_id, int) or not isinstance(duration_ms, int) or not isinstance(won, bool):
         return jsonify({'error': 'word_id, theme_id, duration_ms(int) and won(bool) are required'}), 400
+    if review_status is not None and (not isinstance(review_status, str) or review_status not in {'new', 'review', 'difficult'}):
+        return jsonify({'error': 'review_status must be one of: new, review, difficult'}), 400
     if duration_ms < 0:
         return jsonify({'error': 'duration_ms must be >= 0'}), 400
 
@@ -243,7 +277,13 @@ def submit_game_result():
         if not word_row:
             return jsonify({'error': 'word_id does not belong to theme_id'}), 400
 
-        accuracy, score = _compute_accuracy_and_score(duration_ms, correct_guesses, wrong_guesses, won)
+        accuracy, score = _compute_accuracy_and_score(
+            duration_ms,
+            correct_guesses,
+            wrong_guesses,
+            won,
+            review_status,
+        )
         status = 'won' if won else 'lost'
 
         cursor = conn.execute(

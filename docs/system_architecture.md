@@ -298,11 +298,24 @@ Core tables and meaning:
 
 **Leaderboard ranking (user-aggregated):** Each user appears once. Rank is by `leaderboard_score`:
 
-- **Formula:** `leaderboard_score = SUM(score * POWER(decay_factor, age_in_days)) + streak_bonus + daily_activity_bonus + challenge_bonus_hook`
-- **Defaults (db.py):** decay_factor=0.94, streak_bonus = min(current_streak_days, 30)*8, daily_activity_bonus=50 if played today, challenge_bonus_hook=0 (future daily challenge).
+- **Formula:** `leaderboard_score = SUM(normalized_score * POWER(decay_factor, age_in_days)) + streak_bonus + daily_activity_bonus + challenge_bonus_hook`
+- `normalized_score = score / 10` when historical score `> 100`, else raw `score` (backward-compatible normalization).
+- **Defaults (db.py):** decay_factor=0.97, streak_bonus = min(current_streak_days, 14)*6, daily_activity_bonus=40 if played today, challenge_bonus_hook=0 (future daily challenge).
 - **Streak rules:** First play or gap > 1 day → 1; played yesterday → +1; already played today → unchanged.
 - **Periods:** `today` (games today), `week` (last 7 days), `all` (lifetime_xp from user_stats).
 - **Extension:** Set `LEADERBOARD_CHALLENGE_BONUS_HOOK` or add daily challenge logic for extra bonus.
+
+### Lightweight per-game scoring model
+
+Server-side scoring in `POST /api/game/result` uses a low-range economy for short rounds:
+
+- `completion_score`: win +20, loss +8
+- `accuracy_bonus`: +15 (>=90%), +10 (>=75%), +6 (>=60%), else +0
+- `speed_bonus`: +8 (<=10s), +5 (<=20s), +2 (<=30s), else +0
+- `learning_bonus`: new +4, review +6, difficult +8
+- `game_score` is clamped to 0..60
+
+Target distribution: typical ~20-35, good ~35-45, excellent ~45-50+.
 
 ---
 
