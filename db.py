@@ -7,13 +7,14 @@ DEFAULT_DB_PATH = "hangman.db"
 
 # --- Leaderboard ranking algorithm (user-aggregated, time-decayed) ---
 # leaderboard_score = decayed_game_sum + streak_bonus + daily_activity_bonus + challenge_bonus_hook
-# - decayed_game_sum: SUM(score * POWER(decay_factor, age_in_days)) over games in period
+# - decayed_game_sum: SUM(normalized_score * POWER(decay_factor, age_in_days)) over games in period
+# - normalized_score uses score/10 for legacy scores >100 to reduce historical spikes.
 # - Older scores diminish over time so new active users can climb; long-inactive users fall.
 # - challenge_bonus_hook: reserved for future daily challenge (0 for now).
-LEADERBOARD_DECAY_FACTOR = 0.94
-LEADERBOARD_STREAK_BONUS_PER_DAY = 8
-LEADERBOARD_STREAK_CAP_DAYS = 30
-LEADERBOARD_DAILY_ACTIVITY_BONUS = 50
+LEADERBOARD_DECAY_FACTOR = 0.97
+LEADERBOARD_STREAK_BONUS_PER_DAY = 6
+LEADERBOARD_STREAK_CAP_DAYS = 14
+LEADERBOARD_DAILY_ACTIVITY_BONUS = 40
 LEADERBOARD_CHALLENGE_BONUS_HOOK = 0  # Extension point for daily challenge
 # By default, seed from top-level txt files in data/.
 # Legacy sources under word/ or data/words/ are intentionally ignored.
@@ -637,24 +638,30 @@ def _streak_after_play(
     return 1
 
 
+def _normalize_score_for_leaderboard(score_val: int) -> float:
+    """Normalize historical pre-refactor outliers so legacy high scores don't dominate."""
+    return (score_val / 10.0) if score_val > 100 else float(score_val)
+
+
 def _compute_decayed_sum(scores_with_dates: list[tuple[int, date]], ref_date: date) -> float:
-    """Sum of score * POWER(decay_factor, age_in_days). Used for lifetime_xp and period windows."""
+    """Sum of normalized_score * POWER(decay_factor, age_in_days). Used for lifetime_xp and period windows."""
     total = 0.0
     for score_val, end_date in scores_with_dates:
         age_days = (ref_date - end_date).days
         if age_days < 0:
             age_days = 0
-        total += score_val * (LEADERBOARD_DECAY_FACTOR ** age_days)
+        normalized_score = _normalize_score_for_leaderboard(score_val)
+        total += normalized_score * (LEADERBOARD_DECAY_FACTOR ** age_days)
     return total
 
 
 def _streak_bonus(streak_days: int) -> float:
-    """min(current_streak_days, 30) * 8."""
+    """min(current_streak_days, 14) * 6."""
     return min(streak_days, LEADERBOARD_STREAK_CAP_DAYS) * LEADERBOARD_STREAK_BONUS_PER_DAY
 
 
 def _daily_activity_bonus(last_played_date: date | None, ref_date: date) -> float:
-    """50 if user played on ref_date (today), else 0."""
+    """40 if user played on ref_date (today), else 0."""
     if last_played_date is None:
         return 0.0
     return float(LEADERBOARD_DAILY_ACTIVITY_BONUS) if last_played_date == ref_date else 0.0

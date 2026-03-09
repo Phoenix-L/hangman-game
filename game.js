@@ -11,6 +11,7 @@ let currentWordId = null;
 let currentThemeId = null;
 let currentThemeName = '';
 let gameStartTime = null;
+let currentReviewStatus = 'new';
 let defaultThemeId = 1; // number when online (API theme id), string when offline (theme key e.g. "KET_ANIMALS")
 
 const wordDiv = document.getElementById('word');
@@ -55,13 +56,18 @@ function selectWordOffline(themeKey) {
 }
 
 // --- Offline: compute score locally (same formula as server) ---
-function computeLocalScore(durationMs, correctGuesses, wrongGuesses, won) {
+function computeLocalScore(durationMs, correctGuesses, wrongGuesses, won, reviewStatus) {
     const total = correctGuesses + wrongGuesses;
     const accuracy = total > 0 ? correctGuesses / total : 0;
-    const clampedDuration = Math.min(Math.max(durationMs, 0), 120000);
-    const speedFactor = 1.0 - clampedDuration / 120000;
-    const wonBonus = won ? 100 : 0;
-    return Math.round(accuracy * 700 + speedFactor * 300 + wonBonus);
+
+    const completionScore = won ? 20 : 8;
+    const accuracyBonus = accuracy >= 0.9 ? 15 : (accuracy >= 0.75 ? 10 : (accuracy >= 0.6 ? 6 : 0));
+    const speedBonus = durationMs <= 10000 ? 8 : (durationMs <= 20000 ? 5 : (durationMs <= 30000 ? 2 : 0));
+
+    const learningBonusMap = { new: 4, review: 6, difficult: 8 };
+    const learningBonus = learningBonusMap[reviewStatus] != null ? learningBonusMap[reviewStatus] : 4;
+
+    return Math.max(0, Math.min(60, completionScore + accuracyBonus + speedBonus + learningBonus));
 }
 
 function loadWord(callback) {
@@ -69,6 +75,7 @@ function loadWord(callback) {
     currentWordId = null;
     currentThemeId = null;
     currentThemeName = '';
+    currentReviewStatus = 'new';
     if (themeHintEl) themeHintEl.textContent = '';
 
     if (window.OFFLINE_MODE && typeof VOCAB !== 'undefined' && typeof THEMES !== 'undefined') {
@@ -78,6 +85,7 @@ function loadWord(callback) {
             selectedWord = data.word.value.toLowerCase();
             currentThemeName = (data.theme_display != null && data.theme_display !== '') ? data.theme_display : (data.theme || 'Vocabulary');
             gameStartTime = Date.now();
+            currentReviewStatus = 'new';
             correctLetters = [];
             wrongLetters = [];
             if (messageDiv) messageDiv.textContent = '';
@@ -99,6 +107,7 @@ function loadWord(callback) {
                 currentWordId = wordObj.id != null ? wordObj.id : null;
                 currentThemeId = wordObj.theme_id != null ? wordObj.theme_id : null;
                 currentThemeName = (data.theme_display != null && data.theme_display !== '') ? data.theme_display : ((data.theme != null && data.theme !== '') ? data.theme : 'Vocabulary');
+                currentReviewStatus = (data.review_status === 'review' || data.review_status === 'difficult' || data.review_status === 'new') ? data.review_status : 'new';
                 gameStartTime = Date.now();
                 correctLetters = [];
                 wrongLetters = [];
@@ -186,7 +195,7 @@ function submitGameResult(won) {
     const wrongCount = wrongLetters.length;
 
     if (window.OFFLINE_MODE) {
-        const score = computeLocalScore(durationMs, correctCount, wrongCount, won);
+        const score = computeLocalScore(durationMs, correctCount, wrongCount, won, currentReviewStatus);
         const total = correctCount + wrongCount;
         const accuracy = total > 0 ? correctCount / total : 0;
         return Promise.resolve({ score, accuracy });
@@ -202,6 +211,7 @@ function submitGameResult(won) {
             duration_ms: durationMs,
             guesses: { correct: correctCount, wrong: wrongCount },
             won: won,
+            review_status: currentReviewStatus,
         }),
     })
         .then(function (r) { return r.ok ? r.json() : {}; })

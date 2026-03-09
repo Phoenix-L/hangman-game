@@ -207,3 +207,15 @@ SQLite 当前核心表：
 | Theme Selection in Gameplay UI | Partially Implemented | 前端会读取主题列表并默认使用第一项，但无显式主题选择控件。 |
 | Runtime File-based Word Loading | Not Implemented (by design) | 运行时不直接读词库文件，改为 DB 读取。 |
 
+
+
+## 12. 轻量化评分经济（当前）
+
+- 单局分数改为短局友好模型：`completion + accuracy + speed + learning`，并限制在 `0..60`。
+- 目标分布：普通局约 `20-35`，表现好约 `35-45`，优秀局约 `45-50+`。
+- 排行榜改为低波动长期激励：
+  - `decay_factor = 0.97`
+  - `streak_bonus = min(streak_days, 14) * 6`
+  - `daily_bonus = 40`（当日仅一次）
+- 基线：平均每局约 30 分，20 局/天约 600 分。
+- 历史兼容：对 `score > 100` 的历史记录在聚合时按 `score / 10` 归一化，避免旧高分尖峰长期压制新玩家。

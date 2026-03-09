@@ -253,3 +253,26 @@ For authenticated users, the engine stores per-user/per-word state in `user_word
 - **Incorrect outcome**: `wrong_count += 1`, `ease_factor -= 0.2` (min 1.3), `interval = 1`, `next_review = now + 1 day`
 
 This enables due-review prioritization and difficult-word resurfacing without changing frontend gameplay flow.
+
+
+## Lightweight scoring economy (current)
+
+Per-game score now targets short-session gameplay:
+
+- `game_score = completion_score + accuracy_bonus + speed_bonus + learning_bonus`
+- Completion: win `+20`, loss `+8`
+- Accuracy bonus: `+15` (>=90%), `+10` (>=75%), `+6` (>=60%), else `+0`
+- Speed bonus: `+8` (<=10s), `+5` (<=20s), `+2` (<=30s), else `+0`
+- Learning bonus: `new +4`, `review +6`, `difficult +8`
+- Final game score is clamped to `0..60` (typical ~20-35, strong ~35-45)
+
+Leaderboard baseline is calibrated around ~20 games/day:
+
+- Average game score ≈ `30`
+- Baseline daily activity ≈ `600` points from gameplay
+- `leaderboard_score = decayed_game_sum + streak_bonus + daily_activity_bonus`
+- `decay_factor = 0.97`
+- `streak_bonus = min(current_streak_days, 14) * 6`
+- `daily_activity_bonus = +40` if user played today
+
+Historical compatibility: legacy high game scores are normalized in leaderboard aggregation (`score > 100` uses `score / 10`) so older score spikes do not dominate after the scoring refactor.
