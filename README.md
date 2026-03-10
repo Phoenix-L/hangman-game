@@ -66,6 +66,26 @@ A classic Hangman word guessing game built with HTML, CSS, JavaScript, and a Pyt
 
 2. Open your browser and go to `http://localhost:5000`.
 
+## Running in Home LAN Mode
+
+Start the server:
+
+```bash
+python run_lan_server.py
+```
+
+Then open on any device connected to the same WiFi:
+
+```
+http://<server-ip>:5000
+```
+
+Example:
+
+```
+http://192.168.1.7:5000
+```
+
 ## Offline mode
 
 You can run the game without the Flask server by opening a single HTML file in your browser.
@@ -167,6 +187,7 @@ hangman-game/
 ├── style.css            # Styling
 ├── game.js              # Game logic
 ├── server.py            # Flask backend
+├── run_lan_server.py    # LAN server launcher (prints local + LAN URLs)
 ├── requirements.txt     # Python dependencies
 ├── tests/               # Pytest test files
 ├── assets/              # Sounds
