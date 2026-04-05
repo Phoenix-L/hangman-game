@@ -1,6 +1,10 @@
 // Offline mode: set to true by index-offline.html (vocab.js must load first).
 window.OFFLINE_MODE = window.OFFLINE_MODE || false;
-window.APP_BASE_PATH = window.APP_BASE_PATH || '';
+const detectedBasePath = /^\/hangman(?:\/|$)/.test(window.location.pathname || '')
+    ? '/hangman'
+    : '';
+
+window.APP_BASE_PATH = window.APP_BASE_PATH || detectedBasePath;
 
 let selectedWord = '';
 let correctLetters = [];
@@ -37,8 +41,8 @@ const shareCanvas = document.getElementById('share-canvas');
 
 let latestProgressSummary = null;
 
-function apiUrl(pathWithLeadingSlash) {
-    return window.APP_BASE_PATH + pathWithLeadingSlash;
+function apiUrl(path) {
+    return (window.APP_BASE_PATH || '') + path;
 }
 
 // --- Offline: theme display name (mirrors backend theme_display_name) ---
