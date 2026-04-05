@@ -1,5 +1,7 @@
 // Offline mode: set to true by index-offline.html (vocab.js must load first).
 window.OFFLINE_MODE = window.OFFLINE_MODE || false;
+const detectedBasePath = /^\/hangman(?:\/|$)/.test(window.location.pathname || '') ? '/hangman' : '';
+window.APP_BASE_PATH = window.APP_BASE_PATH || detectedBasePath;
 
 let selectedWord = '';
 let correctLetters = [];
@@ -35,6 +37,10 @@ const shareImage = document.getElementById('share-image');
 const shareCanvas = document.getElementById('share-canvas');
 
 let latestProgressSummary = null;
+
+function apiUrl(pathWithLeadingSlash) {
+    return window.APP_BASE_PATH + pathWithLeadingSlash;
+}
 
 // --- Offline: theme display name (mirrors backend theme_display_name) ---
 function themeDisplayName(themeName) {
@@ -96,7 +102,7 @@ function loadWord(callback) {
         return;
     }
 
-    const url = '/api/word/next?theme=' + defaultThemeId + '&_=' + Date.now();
+    const url = apiUrl('/api/word/next') + '?theme=' + defaultThemeId + '&_=' + Date.now();
     fetch(url, { credentials: 'same-origin' })
         .then(response => response.json())
         .then(data => {
@@ -117,7 +123,7 @@ function loadWord(callback) {
                 callback();
             } else {
                 // Fallback to random_word if word/next fails (e.g. no themes)
-                fetch('/api/random_word?_=' + Date.now())
+                fetch(apiUrl('/api/random_word') + '?_=' + Date.now())
                     .then(r => r.json())
                     .then(fallback => {
                         if (fallback.word) {
@@ -137,7 +143,7 @@ function loadWord(callback) {
         })
         .catch(err => {
             // Fallback to random_word if word/next fails
-            fetch('/api/random_word?_=' + Date.now())
+            fetch(apiUrl('/api/random_word') + '?_=' + Date.now())
                 .then(r => r.json())
                 .then(fallback => {
                     if (fallback.word) {
@@ -201,7 +207,7 @@ function submitGameResult(won) {
         return Promise.resolve({ score, accuracy });
     }
     if (currentWordId == null || currentThemeId == null) return Promise.resolve({ score: null, accuracy: null });
-    return fetch('/api/game/result', {
+    return fetch(apiUrl('/api/game/result'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -353,7 +359,7 @@ function loadProgressSummary() {
         themeProgressDiv.innerHTML = '';
         return Promise.resolve();
     }
-    return fetch('/api/progress/summary')
+    return fetch(apiUrl('/api/progress/summary'))
         .then(response => {
             if (response.status === 401) {
                 throw new Error('Please log in to see your progress dashboard.');
@@ -438,7 +444,7 @@ function loadLeaderboard(limit, containerId, period, options) {
     }
 
     period = period || 'week';
-    const url = '/api/leaderboard/global?limit=' + (limit || 5) + '&period=' + encodeURIComponent(period);
+    const url = apiUrl('/api/leaderboard/global') + '?limit=' + (limit || 5) + '&period=' + encodeURIComponent(period);
     const maxEntries = limit || 5;
     const showStreak = options.showStreak !== false;
     const showLastActive = options.showLastActive === true;
@@ -619,7 +625,7 @@ function refreshAuth() {
         if (authBar) authBar.classList.add('offline-mode');
         return;
     }
-    fetch('/api/me', { credentials: 'same-origin' })
+    fetch(apiUrl('/api/me'), { credentials: 'same-origin' })
         .then(r => r.json())
         .then(data => {
             if (data.guest) {
@@ -646,7 +652,7 @@ signupSubmitBtn.addEventListener('click', () => {
         signupMessage.classList.add('error');
         return;
     }
-    fetch('/api/auth/signup', {
+    fetch(apiUrl('/api/auth/signup'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -680,7 +686,7 @@ loginSubmitBtn.addEventListener('click', () => {
         loginMessage.classList.add('error');
         return;
     }
-    fetch('/api/auth/login', {
+    fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -705,7 +711,7 @@ loginSubmitBtn.addEventListener('click', () => {
 });
 
 logoutBtn.addEventListener('click', () => {
-    fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
+    fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'same-origin' })
         .then(() => refreshAuth());
 });
 
@@ -716,7 +722,7 @@ function startGame() {
         loadLeaderboard(5, 'leaderboard', 'week');
         return;
     }
-    fetch('/api/themes', { credentials: 'same-origin' })
+    fetch(apiUrl('/api/themes'), { credentials: 'same-origin' })
         .then(r => r.json())
         .then(data => {
             if (data.themes && data.themes.length > 0 && data.themes[0].id != null) {
