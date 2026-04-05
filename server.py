@@ -24,7 +24,7 @@ from db import (
 )
 from engine.word_selector import select_guest_word, select_next_word, update_word_progress
 
-app = Flask(__name__, static_folder='.', static_url_path='')
+app = Flask(__name__, static_folder=None)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-only-change-me')
 
 DB_PATH = os.environ.get('HANGMAN_DB_PATH', DEFAULT_DB_PATH)
@@ -97,7 +97,17 @@ def _current_user_id() -> int | None:
 
 @app.route('/')
 def serve_index():
-    return app.send_static_file('index.html')
+    return send_from_directory('.', 'index.html')
+
+
+@app.route('/hangman')
+def hangman_index_redirect():
+    return redirect('/hangman/', code=302)
+
+
+@app.route('/hangman/')
+def serve_hangman_index():
+    return send_from_directory('.', 'index.html')
 
 
 @app.route('/hangman')
@@ -115,7 +125,7 @@ def serve_static(path):
     if path.startswith('hangman/'):
         stripped = path[len('hangman/'):]
         if not stripped:
-            return app.send_static_file('index.html')
+            return send_from_directory('.', 'index.html')
         path = stripped
     return send_from_directory('.', path)
 
