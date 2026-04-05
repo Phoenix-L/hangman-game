@@ -2,16 +2,8 @@
 <html>
 <head>
     <title>Hangman Game</title>
-    <script>
-        (function () {
-            var path = window.location.pathname || '/';
-            window.APP_BASE_PATH = path.indexOf('/hangman') === 0 ? '/hangman' : '';
-            var css = document.createElement('link');
-            css.rel = 'stylesheet';
-            css.href = (window.APP_BASE_PATH || '') + '/style.css';
-            document.head.appendChild(css);
-        })();
-    </script>
+    <link rel="stylesheet" href="/hangman/style.css">
+
 </head>
 <body>
     <h1>Hangman</h1>
@@ -78,22 +70,10 @@
         <canvas id="share-canvas" width="600" height="320" class="hidden"></canvas>
     </section>
 
-    <audio id="correct-sound"></audio>
-    <audio id="wrong-sound"></audio>
-    <audio id="win-sound"></audio>
-    <audio id="lose-sound"></audio>
-    <script>
-        (function () {
-            var base = window.APP_BASE_PATH || '';
-            document.getElementById('correct-sound').src = base + '/assets/correct.mp3';
-            document.getElementById('wrong-sound').src = base + '/assets/wrong.mp3';
-            document.getElementById('win-sound').src = base + '/assets/win.mp3';
-            document.getElementById('lose-sound').src = base + '/assets/lose.mp3';
-
-            var gameScript = document.createElement('script');
-            gameScript.src = base + '/game.js';
-            document.body.appendChild(gameScript);
-        })();
-    </script>
+    <audio id="correct-sound" src="/hangman/assets/correct.mp3"></audio>
+    <audio id="wrong-sound" src="/hangman/assets/wrong.mp3"></audio>
+    <audio id="win-sound" src="/hangman/assets/win.mp3"></audio>
+    <audio id="lose-sound" src="/hangman/assets/lose.mp3"></audio>
+    <script src="/hangman/game.js"></script>
 </body>
 </html>
