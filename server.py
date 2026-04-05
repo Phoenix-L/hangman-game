@@ -3,6 +3,7 @@ from datetime import datetime
 from flask import Flask, jsonify, request, send_from_directory, session, redirect
 from werkzeug.security import check_password_hash, generate_password_hash
 import os
+import sys
 
 from db import (
     DEFAULT_DB_PATH,
@@ -108,16 +109,6 @@ def hangman_index_redirect():
 @app.route('/hangman/')
 def serve_hangman_index():
     return send_from_directory('.', 'index.html')
-
-
-@app.route('/hangman')
-def hangman_index_redirect():
-    return redirect('/hangman/', code=302)
-
-
-@app.route('/hangman/')
-def serve_hangman_index():
-    return app.send_static_file('index.html')
 
 
 @app.route('/<path:path>')
@@ -414,4 +405,17 @@ def get_global_leaderboard():
 
 if __name__ == '__main__':
     debug = os.getenv("FLASK_DEBUG", "0") == "1"
-    app.run(host="0.0.0.0", port=5000, debug=debug)
+    port = int(os.environ.get('PORT', '5000'))
+    print(
+        '\nHangman server — open:',
+        f'http://127.0.0.1:{port}/',
+        f'or http://localhost:{port}/',
+        file=sys.stderr,
+    )
+    if port == 5000:
+        print(
+            'Tip: If the browser tab loads forever, port 5000 may be taken by another app '
+            '(common on Windows, e.g. AirPlay). Retry with: PORT=5001 python server.py\n',
+            file=sys.stderr,
+        )
+    app.run(host='0.0.0.0', port=port, debug=debug)
