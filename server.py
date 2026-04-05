@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from flask import Flask, jsonify, request, send_from_directory, session
+from flask import Flask, jsonify, request, send_from_directory, session, redirect
 from werkzeug.security import check_password_hash, generate_password_hash
 import os
 
@@ -24,12 +24,28 @@ from db import (
 )
 from engine.word_selector import select_guest_word, select_next_word, update_word_progress
 
-app = Flask(__name__, static_folder='.', static_url_path='')
+app = Flask(__name__, static_folder=None)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-only-change-me')
 
 DB_PATH = os.environ.get('HANGMAN_DB_PATH', DEFAULT_DB_PATH)
 
 initialize_and_seed(DB_PATH)
+
+
+def route_with_hangman_prefix(rule: str, **options):
+    """
+    Register an endpoint for both root and /hangman prefixed paths.
+    """
+    if not rule.startswith('/'):
+        raise ValueError('route_with_hangman_prefix requires absolute route rules')
+
+    def decorator(func):
+        endpoint = options.get('endpoint', func.__name__)
+        app.add_url_rule(rule, endpoint=endpoint, view_func=func, **options)
+        app.add_url_rule(f'/hangman{rule}', endpoint=f'{endpoint}__hangman', view_func=func, **options)
+        return func
+
+    return decorator
 
 
 def _compute_accuracy_and_score(
@@ -81,15 +97,30 @@ def _current_user_id() -> int | None:
 
 @app.route('/')
 def serve_index():
-    return app.send_static_file('index.html')
+    return send_from_directory('.', 'index.html')
+
+
+@app.route('/hangman')
+def hangman_index_redirect():
+    return redirect('/hangman/', code=302)
+
+
+@app.route('/hangman/')
+def serve_hangman_index():
+    return send_from_directory('.', 'index.html')
 
 
 @app.route('/<path:path>')
 def serve_static(path):
+    if path.startswith('hangman/'):
+        stripped = path[len('hangman/'):]
+        if not stripped:
+            return send_from_directory('.', 'index.html')
+        path = stripped
     return send_from_directory('.', path)
 
 
-@app.route('/api/random_word')
+@route_with_hangman_prefix('/api/random_word')
 def random_word():
     result = get_random_word(DB_PATH)
     if not result:
@@ -106,12 +137,12 @@ def random_word():
     return response
 
 
-@app.route('/api/themes')
+@route_with_hangman_prefix('/api/themes')
 def get_themes():
     return jsonify({'themes': list_themes(DB_PATH)})
 
 
-@app.route('/api/word/next')
+@route_with_hangman_prefix('/api/word/next')
 def get_next_word():
     theme_id = request.args.get('theme', type=int)
     if theme_id is None:
@@ -147,7 +178,7 @@ def get_next_word():
         conn.close()
 
 
-@app.route('/api/word/progress', methods=['POST'])
+@route_with_hangman_prefix('/api/word/progress', methods=['POST'])
 def record_progress():
     user_id = _current_user_id()
     if not user_id:
@@ -169,7 +200,7 @@ def record_progress():
         conn.close()
 
 
-@app.route('/api/auth/signup', methods=['POST'])
+@route_with_hangman_prefix('/api/auth/signup', methods=['POST'])
 def signup():
     payload = request.get_json(silent=True) or {}
     username = str(payload.get('username', '')).strip()
@@ -187,7 +218,7 @@ def signup():
     return jsonify({'id': user_id, 'username': username}), 201
 
 
-@app.route('/api/auth/login', methods=['POST'])
+@route_with_hangman_prefix('/api/auth/login', methods=['POST'])
 def login():
     payload = request.get_json(silent=True) or {}
     username = str(payload.get('username', '')).strip()
@@ -204,13 +235,13 @@ def login():
     return jsonify({'id': user['id'], 'username': user['username']}), 200
 
 
-@app.route('/api/auth/logout', methods=['POST'])
+@route_with_hangman_prefix('/api/auth/logout', methods=['POST'])
 def logout():
     session.pop('user_id', None)
     return jsonify({'ok': True}), 200
 
 
-@app.route('/api/me')
+@route_with_hangman_prefix('/api/me')
 def me():
     user_id = _current_user_id()
     if not user_id:
@@ -224,7 +255,7 @@ def me():
     return jsonify({'guest': False, 'user': user}), 200
 
 
-@app.route('/api/leaderboard_entries', methods=['POST'])
+@route_with_hangman_prefix('/api/leaderboard_entries', methods=['POST'])
 def create_entry():
     user_id = _current_user_id()
     if not user_id:
@@ -241,7 +272,7 @@ def create_entry():
     return jsonify({'id': entry_id, 'user_id': user_id, 'score': score, 'game_id': game_id}), 201
 
 
-@app.route('/api/game/result', methods=['POST'])
+@route_with_hangman_prefix('/api/game/result', methods=['POST'])
 def submit_game_result():
     payload = request.get_json(silent=True) or {}
     word_id = payload.get('word_id')
@@ -347,7 +378,7 @@ def submit_game_result():
         conn.close()
 
 
-@app.route('/api/progress/summary')
+@route_with_hangman_prefix('/api/progress/summary')
 def get_progress_summary_route():
     user_id = _current_user_id()
     if not user_id:
@@ -356,7 +387,7 @@ def get_progress_summary_route():
     return jsonify(summary), 200
 
 
-@app.route('/api/leaderboard/global')
+@route_with_hangman_prefix('/api/leaderboard/global')
 def get_global_leaderboard():
     period = request.args.get('period', default='all', type=str)
     if period not in ('today', 'week', 'all'):
