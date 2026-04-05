@@ -1,7 +1,6 @@
 // Offline mode: set to true by index-offline.html (vocab.js must load first).
 window.OFFLINE_MODE = window.OFFLINE_MODE || false;
-const detectedBasePath = /^\/hangman(?:\/|$)/.test(window.location.pathname || '') ? '/hangman' : '';
-window.APP_BASE_PATH = window.APP_BASE_PATH || detectedBasePath;
+window.APP_BASE_PATH = window.APP_BASE_PATH || '';
 
 let selectedWord = '';
 let correctLetters = [];

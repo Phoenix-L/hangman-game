@@ -2,8 +2,13 @@
 <html>
 <head>
     <title>Hangman Game</title>
-    <link rel="stylesheet" href="/hangman/style.css">
-
+    <script>
+(function () {
+    var path = window.location.pathname || '/';
+    window.APP_BASE_PATH = path.indexOf('/hangman') === 0 ? '/hangman' : '';
+})();
+</script>
+    <link rel="stylesheet" href="./style.css">
 </head>
 <body>
     <h1>Hangman</h1>
@@ -70,10 +75,10 @@
         <canvas id="share-canvas" width="600" height="320" class="hidden"></canvas>
     </section>
 
-    <audio id="correct-sound" src="/hangman/assets/correct.mp3"></audio>
-    <audio id="wrong-sound" src="/hangman/assets/wrong.mp3"></audio>
-    <audio id="win-sound" src="/hangman/assets/win.mp3"></audio>
-    <audio id="lose-sound" src="/hangman/assets/lose.mp3"></audio>
-    <script src="/hangman/game.js"></script>
+    <audio id="correct-sound" src="./assets/correct.mp3"></audio>
+    <audio id="wrong-sound" src="./assets/wrong.mp3"></audio>
+    <audio id="win-sound" src="./assets/win.mp3"></audio>
+    <audio id="lose-sound" src="./assets/lose.mp3"></audio>
+    <script src="./game.js"></script>
 </body>
 </html>
