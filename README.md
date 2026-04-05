@@ -165,6 +165,12 @@ python server.py
 
 Open the app at [http://localhost:5000](http://localhost:5000).
 
+**Browser never finishes loading?** On Windows, port **5000** is often used by system features (e.g. AirPlay). Use another port, then open that URL:
+
+```bash
+PORT=5001 python server.py
+```
+
 ### Makefile shortcuts
 
 After cloning, you can use:

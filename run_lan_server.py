@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Start the Hangman Flask server for LAN access. Prints local and LAN URLs."""
 
+import os
 import socket
 import subprocess
 import sys
@@ -20,9 +21,10 @@ def get_lan_ip():
 
 if __name__ == "__main__":
     ip = get_lan_ip()
+    port = int(os.environ.get("PORT", "5000"))
 
     print("\nHangman server starting...\n")
-    print("Local: http://localhost:5000")
-    print(f"LAN:   http://{ip}:5000\n")
+    print(f"Local: http://localhost:{port}")
+    print(f"LAN:   http://{ip}:{port}\n")
 
-    subprocess.run([sys.executable, "server.py"])
+    subprocess.run([sys.executable, "server.py"], env=os.environ.copy())

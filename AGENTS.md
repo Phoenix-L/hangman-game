@@ -20,7 +20,9 @@
    ```bash
    python server.py
    ```
-5. Open the app at `http://localhost:5000`.
+5. Open the app at `http://localhost:5000` (or the port you set with `PORT=...`).
+
+If the page loads forever on Windows, try `PORT=5001 python server.py` — port 5000 is often taken by other services.
 
 ## Test commands
 
