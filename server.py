@@ -110,6 +110,16 @@ def serve_hangman_index():
     return send_from_directory('.', 'index.html')
 
 
+@app.route('/hangman')
+def hangman_index_redirect():
+    return redirect('/hangman/', code=302)
+
+
+@app.route('/hangman/')
+def serve_hangman_index():
+    return app.send_static_file('index.html')
+
+
 @app.route('/<path:path>')
 def serve_static(path):
     if path.startswith('hangman/'):

@@ -143,38 +143,64 @@ Three ways to run the game.
 
 # 🛠 Installation
 
-Clone the repository:
-```Bash
-git clone https://github.com/
-<repo>/hangman-game.git
+Clone the repository and enter the project directory:
+```bash
+git clone https://github.com/<owner>/hangman-game.git
 cd hangman-game
 ```
 
+### One-command setup (recommended)
 
-Install dependencies:
-```Bash
-pip install -r requirements.txt
+Creates a `.venv`, installs dependencies, runs `pytest`, and initializes/seeds the SQLite database:
+
+```bash
+bash scripts/bootstrap_local.sh
 ```
 
-
-Start the server:
-```Bash
+Then start the server:
+```bash
+source .venv/bin/activate
 python server.py
 ```
 
+Open the app at [http://localhost:5000](http://localhost:5000).
 
-Open browser:
-```http://localhost:5000```
+### Makefile shortcuts
+
+After cloning, you can use:
+
+```bash
+make bootstrap   # same as bash scripts/bootstrap_local.sh
+make setup       # venv + pip install only
+make test        # pytest (runs setup first)
+make db          # initialize/seed database (runs setup first)
+make run         # Flask dev server (runs setup first)
+```
+
+### Manual setup
+
+If you prefer not to use the bootstrap script:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+python scripts/init_db.py
+python server.py
+```
 
 
 ---
 
 # 🏠 LAN Mode (Play with Family)
 
-Run the server:
-```Bash
+With the virtual environment active, run:
+```bash
 python run_lan_server.py
 ```
+
+(If you used the bootstrap script, run `source .venv/bin/activate` first.)
 
 
 Console output example:
@@ -202,7 +228,7 @@ Example:
 ```
 data/ket_animals.txt
 data/ket_food.txt
-data/pet_environment.txt
+data/ket_environment.txt
 ```
 
 
@@ -219,9 +245,16 @@ horse
 
 # 🧪 Testing
 
-Run tests:
-```Bash
-pytest
+With the virtual environment active:
+
+```bash
+pytest -q
+```
+
+Or from a fresh shell:
+
+```bash
+make test
 ```
 
 
