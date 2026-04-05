@@ -101,4 +101,7 @@ node_modules/
 *.tgz
 .yarn-integrity
 tmp/
-temp/ 
+temp/
+
+# Local WIP backup (do not commit)
+server.py.wip-backup 
