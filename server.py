@@ -15,11 +15,13 @@ from db import (
     get_user_by_username,
     get_progress_summary,
     get_random_word,
+    get_active_theme_id,
     get_user_leaderboard_rank,
     initialize_and_seed,
     list_global_leaderboard,
     list_leaderboard_aggregated,
     list_themes,
+    set_active_theme,
     theme_display_name,
     upsert_user_stats_after_game,
 )
@@ -110,6 +112,25 @@ def hangman_index_redirect():
 def serve_hangman_index():
     return send_from_directory('.', 'index.html')
 
+@app.route('/admin')
+def serve_admin():
+    return send_from_directory('.', 'admin.html')
+
+
+@app.route('/admin/')
+def serve_admin_slash():
+    return redirect('/admin', code=302)
+
+
+@app.route('/hangman/admin')
+def serve_hangman_admin():
+    return send_from_directory('.', 'admin.html')
+
+
+@app.route('/hangman/admin/')
+def serve_hangman_admin_slash():
+    return redirect('/hangman/admin', code=302)
+
 
 @app.route('/<path:path>')
 def serve_static(path):
@@ -145,9 +166,9 @@ def get_themes():
 
 @route_with_hangman_prefix('/api/word/next')
 def get_next_word():
-    theme_id = request.args.get('theme', type=int)
+    theme_id = get_active_theme_id(DB_PATH)
     if theme_id is None:
-        return jsonify({'error': 'theme query parameter is required'}), 400
+        return jsonify({'error': 'No active theme configured'}), 404
 
     user_id = _current_user_id()
     conn = get_connection(DB_PATH)
@@ -177,6 +198,26 @@ def get_next_word():
         })
     finally:
         conn.close()
+
+
+@route_with_hangman_prefix('/api/admin/themes')
+def get_admin_themes():
+    if session.get("is_admin") is not True:
+        return jsonify({'error': 'Forbidden'}), 403
+    return jsonify({'themes': list_themes(DB_PATH)}), 200
+
+
+@route_with_hangman_prefix('/api/admin/themes/select', methods=['POST'])
+def select_admin_theme():
+    if session.get("is_admin") is not True:
+        return jsonify({'error': 'Forbidden'}), 403
+    payload = request.get_json(silent=True) or {}
+    theme_id = payload.get('theme_id')
+    if not isinstance(theme_id, int):
+        return jsonify({'error': 'theme_id(int) is required'}), 400
+    if not set_active_theme(DB_PATH, theme_id):
+        return jsonify({'error': 'Theme not found'}), 404
+    return jsonify({'ok': True, 'theme_id': theme_id}), 200
 
 
 @route_with_hangman_prefix('/api/word/progress', methods=['POST'])
