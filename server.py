@@ -207,6 +207,15 @@ def get_admin_themes():
     return jsonify({'themes': list_themes(DB_PATH)}), 200
 
 
+@route_with_hangman_prefix('/api/admin/session', methods=['POST'])
+def enable_admin_session():
+    """
+    Minimal admin bootstrap for MVP: marks current session as admin.
+    """
+    session['is_admin'] = True
+    return jsonify({'ok': True, 'is_admin': True}), 200
+
+
 @route_with_hangman_prefix('/api/admin/themes/select', methods=['POST'])
 def select_admin_theme():
     if session.get("is_admin") is not True:

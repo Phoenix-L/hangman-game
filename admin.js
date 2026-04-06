@@ -37,7 +37,18 @@ function renderThemes(themes) {
 }
 
 async function loadThemes() {
-    const response = await fetch(apiUrl('/api/admin/themes'), { credentials: 'same-origin' });
+    let response = await fetch(apiUrl('/api/admin/themes'), { credentials: 'same-origin' });
+    if (response.status === 403) {
+        const adminSessionResponse = await fetch(apiUrl('/api/admin/session'), {
+            method: 'POST',
+            credentials: 'same-origin',
+        });
+        if (!adminSessionResponse.ok) {
+            throw new Error('Failed to enable admin session');
+        }
+        response = await fetch(apiUrl('/api/admin/themes'), { credentials: 'same-origin' });
+    }
+
     const payload = await response.json();
     if (!response.ok) {
         throw new Error(payload.error || 'Failed to load themes');

@@ -33,11 +33,23 @@ def test_admin_themes_requires_admin(client_with_seeded_db):
     assert response.status_code == 403
 
 
+def test_admin_session_endpoint_enables_admin(client_with_seeded_db):
+    client, _ = client_with_seeded_db
+
+    enable_resp = client.post('/api/admin/session')
+    assert enable_resp.status_code == 200
+    assert enable_resp.get_json()['is_admin'] is True
+
+    themes_resp = client.get('/api/admin/themes')
+    assert themes_resp.status_code == 200
+    assert len(themes_resp.get_json()['themes']) >= 1
+
+
 def test_admin_theme_select_updates_active_theme(client_with_seeded_db):
     client, db_path = client_with_seeded_db
 
-    with client.session_transaction() as sess:
-        sess['is_admin'] = True
+    enable_resp = client.post('/api/admin/session')
+    assert enable_resp.status_code == 200
 
     themes_resp = client.get('/api/admin/themes')
     assert themes_resp.status_code == 200
@@ -62,8 +74,8 @@ def test_admin_theme_select_updates_active_theme(client_with_seeded_db):
 def test_word_next_uses_active_theme(client_with_seeded_db):
     client, _ = client_with_seeded_db
 
-    with client.session_transaction() as sess:
-        sess['is_admin'] = True
+    enable_resp = client.post('/api/admin/session')
+    assert enable_resp.status_code == 200
 
     themes_resp = client.get('/api/admin/themes')
     themes = themes_resp.get_json()['themes']
