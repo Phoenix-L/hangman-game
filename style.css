@@ -255,3 +255,51 @@ h2, h3 {
     color: #666;
     font-style: italic;
 }
+
+.admin-subtitle {
+    margin-top: -0.6em;
+    color: #2e7031;
+}
+
+.admin-card {
+    max-width: 540px;
+}
+
+.theme-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6em;
+    padding: 0.55em 0.2em;
+    border-bottom: 1px solid #eef2df;
+}
+
+.theme-option input[type='radio'] {
+    margin-right: 0.55em;
+}
+
+.active-badge {
+    background: #388e3c;
+    color: #fff;
+    padding: 0.12em 0.6em;
+    border-radius: 999px;
+    font-size: 0.75em;
+    font-weight: 700;
+}
+
+#apply-theme-btn {
+    margin-top: 0.9em;
+    padding: 0.55em 1.5em;
+    font-size: 1em;
+    background: #388e3c;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.admin-message {
+    min-height: 1.2em;
+    margin-bottom: 0.6em;
+    font-weight: 600;
+}

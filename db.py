@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS themes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     description TEXT,
+    is_active INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -172,6 +173,24 @@ def _ensure_games_columns(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE games ADD COLUMN {column_name} {column_type}")
 
 
+def _ensure_themes_is_active_column(conn: sqlite3.Connection) -> None:
+    columns = conn.execute("PRAGMA table_info(themes)").fetchall()
+    names = {col[1] for col in columns}
+    if "is_active" not in names:
+        conn.execute("ALTER TABLE themes ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0")
+
+
+def _ensure_one_active_theme(conn: sqlite3.Connection) -> None:
+    active_row = conn.execute("SELECT id FROM themes WHERE is_active = 1 LIMIT 1").fetchone()
+    if active_row is not None:
+        return
+    first_row = conn.execute("SELECT id FROM themes ORDER BY id ASC LIMIT 1").fetchone()
+    if first_row is None:
+        return
+    conn.execute("UPDATE themes SET is_active = 0")
+    conn.execute("UPDATE themes SET is_active = 1 WHERE id = ?", (first_row["id"],))
+
+
 def _ensure_user_word_progress_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -277,6 +296,8 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
         _ensure_users_password_hash_column(conn)
         _migrate_legacy_word_progress(conn)
         _ensure_games_columns(conn)
+        _ensure_themes_is_active_column(conn)
+        _ensure_one_active_theme(conn)
         _ensure_user_word_progress_table(conn)
         _ensure_user_stats_table(conn)
         _backfill_user_stats(conn)
@@ -343,7 +364,7 @@ def seed_words_from_files(db_path: str = DEFAULT_DB_PATH, source_dirs: Iterable[
                     (theme_id, word),
                 )
                 inserted_words += cursor.rowcount
-
+        _ensure_one_active_theme(conn)
         conn.commit()
         return inserted_words
     finally:
@@ -373,14 +394,42 @@ def list_themes(db_path: str = DEFAULT_DB_PATH) -> list[dict]:
     try:
         rows = conn.execute(
             """
-            SELECT t.id, t.name, t.description, COUNT(w.id) AS word_count
+            SELECT t.id, t.name, t.description, t.is_active, COUNT(w.id) AS word_count
             FROM themes t
             LEFT JOIN words w ON w.theme_id = t.id
-            GROUP BY t.id, t.name, t.description
+            GROUP BY t.id, t.name, t.description, t.is_active
             ORDER BY t.name
             """
         ).fetchall()
         return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_active_theme_id(db_path: str = DEFAULT_DB_PATH) -> int | None:
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT id FROM themes WHERE is_active = 1 ORDER BY id ASC LIMIT 1"
+        ).fetchone()
+        if row:
+            return int(row["id"])
+        fallback = conn.execute("SELECT id FROM themes ORDER BY id ASC LIMIT 1").fetchone()
+        return int(fallback["id"]) if fallback else None
+    finally:
+        conn.close()
+
+
+def set_active_theme(db_path: str, theme_id: int) -> bool:
+    conn = get_connection(db_path)
+    try:
+        exists = conn.execute("SELECT 1 FROM themes WHERE id = ?", (theme_id,)).fetchone()
+        if not exists:
+            return False
+        conn.execute("UPDATE themes SET is_active = 0")
+        conn.execute("UPDATE themes SET is_active = 1 WHERE id = ?", (theme_id,))
+        conn.commit()
+        return True
     finally:
         conn.close()
 
