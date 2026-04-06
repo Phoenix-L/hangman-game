@@ -14,3 +14,5 @@ def test_server_app_import_and_root_route():
     client = server.app.test_client()
     response = client.get("/")
     assert response.status_code == 200
+    response.get_data()
+    response.close()
