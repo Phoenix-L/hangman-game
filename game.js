@@ -105,7 +105,7 @@ function loadWord(callback) {
         return;
     }
 
-    const url = apiUrl('/api/word/next') + '?theme=' + defaultThemeId + '&_=' + Date.now();
+    const url = apiUrl('/api/word/next') + '?_=' + Date.now();
     fetch(url, { credentials: 'same-origin' })
         .then(response => response.json())
         .then(data => {

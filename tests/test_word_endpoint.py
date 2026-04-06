@@ -34,7 +34,7 @@ def test_get_word_next_guest_mode(client_with_seeded_db):
     finally:
         conn.close()
 
-    response = client.get(f'/api/word/next?theme={theme_id}')
+    response = client.get('/api/word/next')
     assert response.status_code == 200
     payload = response.get_json()
     assert payload['review_status'] == 'guest_random'
@@ -53,19 +53,12 @@ def test_get_word_next_authenticated_uses_engine(client_with_seeded_db):
     finally:
         conn.close()
 
-    response = client.get(f'/api/word/next?theme={theme_id}')
+    response = client.get('/api/word/next')
     assert response.status_code == 200
     payload = response.get_json()
     assert payload['review_status'] in {'new', 'random_fallback'}
     assert payload['word']['theme_id'] == theme_id
     assert payload['theme'] == 'KET'
-
-
-def test_get_word_next_requires_theme_query(client_with_seeded_db):
-    client, _ = client_with_seeded_db
-
-    response = client.get('/api/word/next')
-    assert response.status_code == 400
 
 
 def test_random_word_returns_word_and_theme(client_with_seeded_db):
