@@ -14,6 +14,7 @@ from db import (
     get_user_by_id,
     get_user_by_username,
     get_progress_summary,
+    get_word_metadata,
     get_random_word,
     get_active_theme_id,
     get_user_leaderboard_rank,
@@ -149,8 +150,12 @@ def random_word():
         return jsonify({'error': 'No words found in database'}), 404
 
     theme_name = result.get('theme') or 'Vocabulary'
+    metadata = get_word_metadata(DB_PATH, result['id'])
     response = jsonify({
         'word': result['value'],
+        'answer': result['value'],
+        'display_term': metadata['display_term'] if metadata else result['value'],
+        'pronunciation_text': metadata['pronunciation_text'] if metadata else result['value'],
         'theme': theme_name,
         'theme_display': theme_display_name(theme_name),
     })
@@ -188,8 +193,22 @@ def get_next_word():
             return jsonify({'error': 'No words found for theme'}), 404
 
         theme_name = get_theme_name_by_id(DB_PATH, selection.word['theme_id']) or 'Vocabulary'
+        word_payload = dict(selection.word)
+        metadata = get_word_metadata(DB_PATH, int(word_payload['id']))
+        if metadata:
+            word_payload.update({
+                'answer': word_payload['value'],
+                'display_term': metadata['display_term'],
+                'pronunciation_text': metadata['pronunciation_text'],
+            })
+        else:
+            word_payload.update({
+                'answer': word_payload['value'],
+                'display_term': word_payload['value'],
+                'pronunciation_text': word_payload['value'],
+            })
         return jsonify({
-            'word': selection.word,
+            'word': word_payload,
             'word_text': selection.word.get('value') if selection.word else None,
             'theme': theme_name,
             'theme_display': theme_display_name(theme_name),

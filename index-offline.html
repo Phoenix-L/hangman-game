@@ -46,6 +46,7 @@
         <div id="wrong-letters"></div>
         <div id="message"></div>
         <button id="restart-btn" style="display:none;">Play Again</button>
+        <button id="pronounce-again-btn" type="button" style="display:none;" aria-label="Pronounce the answer again">🔊 Pronounce again</button>
         <div id="leaderboard" class="leaderboard-card"></div>
     </section>
 
@@ -69,6 +70,8 @@
     <audio id="lose-sound" src="assets/lose.mp3"></audio>
     <script>window.OFFLINE_MODE = true;</script>
     <script src="vocab.js"></script>
+    <script src="game_logic.js"></script>
+    <script src="speech_controller.js"></script>
     <script src="game.js"></script>
 </body>
 </html>

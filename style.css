@@ -108,6 +108,7 @@ h2, h3 {
 }
 
 #restart-btn,
+#pronounce-again-btn,
 #share-progress-btn {
     padding: 0.5em 1.5em;
     font-size: 1em;
@@ -119,8 +120,15 @@ h2, h3 {
 }
 
 #restart-btn:hover,
+#pronounce-again-btn:hover,
 #share-progress-btn:hover {
     background: #2e7031;
+}
+
+#pronounce-again-btn:focus-visible,
+#restart-btn:focus-visible {
+    outline: 3px solid #f6c344;
+    outline-offset: 2px;
 }
 
 .card {

@@ -9,8 +9,13 @@ import json
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.validate_neurobiology_glossary import DEFAULT_PATH, THEME_BY_CATEGORY, validate
+
+
 DEFAULT_DATA_DIR = ROOT / "data"
 DEFAULT_OUTPUT = ROOT / "vocab.js"
 
@@ -54,6 +59,33 @@ def build_vocab_and_themes(data_dir: Path) -> tuple[dict[str, list[str]], list[d
     return vocab, themes
 
 
+def add_neurobiology_vocab(
+    vocab: dict[str, list[str]], themes: list[dict], glossary_path: Path = DEFAULT_PATH
+) -> None:
+    """Merge approved glossary answers into the same generated offline vocabulary."""
+    if not glossary_path.exists():
+        return
+    theme_by_id = {theme["id"]: theme for theme in themes}
+    for row in validate(glossary_path):
+        if row["status"].strip().lower() != "approved" or row["hangman_enabled"].strip().lower() != "yes":
+            continue
+        theme_key = THEME_BY_CATEGORY[row["category"].strip()]
+        values = vocab.setdefault(theme_key, [])
+        answer = row["answer"].strip().lower()
+        if answer not in values:
+            values.append(answer)
+        if theme_key not in theme_by_id:
+            theme = {
+                "id": theme_key,
+                "name": theme_key,
+                "display": theme_display_name(theme_key),
+                "word_count": 0,
+            }
+            themes.append(theme)
+            theme_by_id[theme_key] = theme
+        theme_by_id[theme_key]["word_count"] = len(values)
+
+
 def emit_js(vocab: dict, themes: list[dict], out_path: Path) -> None:
     """Write vocab.js with VOCAB and THEMES."""
     vocab_json = json.dumps(vocab, ensure_ascii=False)
@@ -74,6 +106,7 @@ def main() -> int:
         return 1
 
     vocab, themes = build_vocab_and_themes(data_dir)
+    add_neurobiology_vocab(vocab, themes)
     if not vocab:
         print("Warning: no vocabulary files found.", file=sys.stderr)
 
