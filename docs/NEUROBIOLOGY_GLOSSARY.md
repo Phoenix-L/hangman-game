@@ -22,10 +22,20 @@ clinical terms.
 
 ## Database safety
 
-`word_metadata` is created additively by `db.init_db()`. The importer inserts
+`word_metadata` is created additively by `db.init_db()`. Application startup
+and `scripts/init_db.py` use the additive path. The importer inserts
 missing themes, words, and metadata and updates only the matching glossary
 metadata. It never clears vocabulary, deletes words, or rewrites games,
 progress, users, or leaderboard rows. Re-running the importer is idempotent.
+
+The destructive development-only path is named `reset_and_seed_database()` and
+is reachable from `scripts/init_db.py` only with both
+`--reset-destructive --confirm-destructive-reset`. It is never called by
+`server.py` or normal bootstrap.
+
+If an old database contains the pre-migration `word_progress` shape, normal
+initialization renames that legacy table to `word_progress_legacy` before
+creating the current additive table; it does not drop the legacy rows.
 
 ## Validation and offline mode
 

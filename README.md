@@ -211,6 +211,21 @@ python scripts/init_db.py
 python server.py
 ```
 
+Database initialization and application startup are additive and idempotent:
+they create or migrate schema and add missing vocabulary without deleting
+users, words, games, progress, metadata, or leaderboard rows. Running
+`python scripts/init_db.py` repeatedly is safe and must never be used as a
+vocabulary synchronization reset.
+
+For a disposable development database that genuinely needs a destructive
+reset, make a backup first and use both explicit flags:
+
+```bash
+python scripts/init_db.py --reset-destructive --confirm-destructive-reset
+```
+
+This prints a destructive-operation warning. Never run it against production.
+
 
 ---
 
