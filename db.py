@@ -113,6 +113,22 @@ ON user_word_progress(next_review);
 
 CREATE INDEX IF NOT EXISTS idx_user_word_progress_user_id
 ON user_word_progress(user_id);
+
+CREATE TABLE IF NOT EXISTS word_metadata (
+    word_id INTEGER PRIMARY KEY,
+    source_term_id TEXT NOT NULL UNIQUE,
+    display_term TEXT NOT NULL,
+    pronunciation_text TEXT NOT NULL,
+    chinese TEXT NOT NULL DEFAULT '',
+    definition_simple TEXT NOT NULL DEFAULT '',
+    detailed_category TEXT NOT NULL DEFAULT '',
+    part_of_speech TEXT NOT NULL DEFAULT '',
+    theme_key TEXT NOT NULL,
+    FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_word_metadata_source_term_id
+ON word_metadata(source_term_id);
 """
 
 
@@ -247,6 +263,29 @@ def _ensure_user_stats_table(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_word_metadata_table(conn: sqlite3.Connection) -> None:
+    """Additive metadata table for glossary-backed words."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS word_metadata (
+            word_id INTEGER PRIMARY KEY,
+            source_term_id TEXT NOT NULL UNIQUE,
+            display_term TEXT NOT NULL,
+            pronunciation_text TEXT NOT NULL,
+            chinese TEXT NOT NULL DEFAULT '',
+            definition_simple TEXT NOT NULL DEFAULT '',
+            detailed_category TEXT NOT NULL DEFAULT '',
+            part_of_speech TEXT NOT NULL DEFAULT '',
+            theme_key TEXT NOT NULL,
+            FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_word_metadata_source_term_id ON word_metadata(source_term_id)"
+    )
+
+
 def _backfill_user_stats(conn: sqlite3.Connection) -> None:
     """One-time backfill: compute user_stats for users who have games but no row."""
     user_ids = conn.execute(
@@ -300,6 +339,7 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
         _ensure_one_active_theme(conn)
         _ensure_user_word_progress_table(conn)
         _ensure_user_stats_table(conn)
+        _ensure_word_metadata_table(conn)
         _backfill_user_stats(conn)
         conn.commit()
     finally:
@@ -464,11 +504,24 @@ def get_random_word(db_path: str = DEFAULT_DB_PATH) -> dict[str, str] | None:
     try:
         row = conn.execute(
             """
-            SELECT w.value, t.name AS theme
+            SELECT w.id, w.value, t.name AS theme
             FROM words w
             JOIN themes t ON t.id = w.theme_id
             ORDER BY RANDOM() LIMIT 1
             """,
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_word_metadata(db_path: str, word_id: int) -> dict | None:
+    """Return optional glossary metadata for a word without exposing it by default."""
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM word_metadata WHERE word_id = ?",
+            (word_id,),
         ).fetchone()
         return dict(row) if row else None
     finally:

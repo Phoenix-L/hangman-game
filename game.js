@@ -7,6 +7,8 @@ const detectedBasePath = /^\/hangman(?:\/|$)/.test(window.location.pathname || '
 window.APP_BASE_PATH = window.APP_BASE_PATH || detectedBasePath;
 
 let selectedWord = '';
+let displayTerm = '';
+let pronunciationText = '';
 let correctLetters = [];
 let wrongLetters = [];
 const maxWrong = 6;
@@ -18,11 +20,16 @@ let currentThemeName = '';
 let gameStartTime = null;
 let currentReviewStatus = 'new';
 let defaultThemeId = 1; // number when online (API theme id), string when offline (theme key e.g. "KET_ANIMALS")
+let gameCompleted = false;
 
 const wordDiv = document.getElementById('word');
 const wrongDiv = document.getElementById('wrong-letters');
 const messageDiv = document.getElementById('message');
 const restartBtn = document.getElementById('restart-btn');
+const pronounceAgainBtn = document.getElementById('pronounce-again-btn');
+const speechController = typeof window.createPronunciationController === 'function'
+    ? window.createPronunciationController()
+    : null;
 const themeHintEl = document.getElementById('theme-hint');
 
 const canvas = document.getElementById('hangman-canvas');
@@ -64,6 +71,49 @@ function selectWordOffline(themeKey) {
     };
 }
 
+function applyWordData(data) {
+    const wordObj = data && typeof data.word === 'object' ? data.word : null;
+    const answer = wordObj && (wordObj.answer || wordObj.value || wordObj.word);
+    if (!answer) return false;
+    selectedWord = (window.HangmanLogic ? window.HangmanLogic.normalizeHangmanAnswer(answer) : String(answer).toLowerCase());
+    displayTerm = (wordObj && wordObj.display_term) || data.display_term || answer;
+    pronunciationText = (wordObj && wordObj.pronunciation_text) || data.pronunciation_text || displayTerm;
+    currentWordId = wordObj && wordObj.id != null ? wordObj.id : null;
+    currentThemeId = wordObj && wordObj.theme_id != null ? wordObj.theme_id : null;
+    currentThemeName = (data.theme_display != null && data.theme_display !== '') ? data.theme_display : ((data.theme != null && data.theme !== '') ? data.theme : 'Vocabulary');
+    currentReviewStatus = (data.review_status === 'review' || data.review_status === 'difficult' || data.review_status === 'new') ? data.review_status : 'new';
+    gameStartTime = Date.now();
+    correctLetters = [];
+    wrongLetters = [];
+    gameCompleted = false;
+    if (messageDiv) messageDiv.textContent = '';
+    if (pronounceAgainBtn) pronounceAgainBtn.style.display = 'none';
+    return true;
+}
+
+function cancelPendingSpeech() {
+    if (speechController) speechController.cancel();
+}
+
+function pronounceCurrentWord() {
+    const text = pronunciationText || displayTerm || selectedWord;
+    return speechController ? speechController.pronounce(text) : false;
+}
+
+function playAudio(audio) {
+    if (!audio || typeof audio.play !== 'function') return Promise.resolve();
+    try {
+        const result = audio.play();
+        return result && typeof result.catch === 'function' ? result.catch(() => {}) : Promise.resolve();
+    } catch (_) {
+        return Promise.resolve();
+    }
+}
+
+function playResultSoundAndPronounce(audio) {
+    if (speechController) speechController.schedule(pronunciationText || displayTerm || selectedWord, audio);
+}
+
 // --- Offline: compute score locally (same formula as server) ---
 function computeLocalScore(durationMs, correctGuesses, wrongGuesses, won, reviewStatus) {
     const total = correctGuesses + wrongGuesses;
@@ -80,24 +130,21 @@ function computeLocalScore(durationMs, correctGuesses, wrongGuesses, won, review
 }
 
 function loadWord(callback) {
+    cancelPendingSpeech();
     restartBtn.style.display = 'none';
     currentWordId = null;
     currentThemeId = null;
     currentThemeName = '';
     currentReviewStatus = 'new';
+    displayTerm = '';
+    pronunciationText = '';
     if (themeHintEl) themeHintEl.textContent = '';
 
     if (window.OFFLINE_MODE && typeof VOCAB !== 'undefined' && typeof THEMES !== 'undefined') {
         const themeKey = typeof defaultThemeId === 'string' ? defaultThemeId : (THEMES[0] && THEMES[0].id) || 'KET_ANIMALS';
         const data = selectWordOffline(themeKey);
         if (data && data.word && data.word.value) {
-            selectedWord = data.word.value.toLowerCase();
-            currentThemeName = (data.theme_display != null && data.theme_display !== '') ? data.theme_display : (data.theme || 'Vocabulary');
-            gameStartTime = Date.now();
-            currentReviewStatus = 'new';
-            correctLetters = [];
-            wrongLetters = [];
-            if (messageDiv) messageDiv.textContent = '';
+            applyWordData(data);
             callback();
         } else {
             alert('No words found for theme. Ensure vocab.js is loaded.');
@@ -110,19 +157,7 @@ function loadWord(callback) {
         .then(response => response.json())
         .then(data => {
             const wordObj = data.word;
-            const wordText = wordObj && (wordObj.value || wordObj.word);
-            if (wordText) {
-                selectedWord = wordText.toLowerCase();
-                currentWordId = wordObj.id != null ? wordObj.id : null;
-                currentThemeId = wordObj.theme_id != null ? wordObj.theme_id : null;
-                currentThemeName = (data.theme_display != null && data.theme_display !== '') ? data.theme_display : ((data.theme != null && data.theme !== '') ? data.theme : 'Vocabulary');
-                currentReviewStatus = (data.review_status === 'review' || data.review_status === 'difficult' || data.review_status === 'new') ? data.review_status : 'new';
-                gameStartTime = Date.now();
-                correctLetters = [];
-                wrongLetters = [];
-                if (messageDiv) {
-                    messageDiv.textContent = '';
-                }
+            if (applyWordData(data)) {
                 callback();
             } else {
                 // Fallback to random_word if word/next fails (e.g. no themes)
@@ -130,12 +165,7 @@ function loadWord(callback) {
                     .then(r => r.json())
                     .then(fallback => {
                         if (fallback.word) {
-                            selectedWord = fallback.word.toLowerCase();
-                            currentThemeName = (fallback.theme_display != null && fallback.theme_display !== '') ? fallback.theme_display : ((fallback.theme != null && fallback.theme !== '') ? fallback.theme : 'Vocabulary');
-                            gameStartTime = Date.now();
-                            correctLetters = [];
-                            wrongLetters = [];
-                            if (messageDiv) messageDiv.textContent = '';
+                            applyWordData({ ...fallback, word: { value: fallback.word, display_term: fallback.display_term, pronunciation_text: fallback.pronunciation_text } });
                             callback();
                         } else {
                             alert('Failed to load word: ' + (data.error || fallback.error || 'Unknown error'));
@@ -150,12 +180,7 @@ function loadWord(callback) {
                 .then(r => r.json())
                 .then(fallback => {
                     if (fallback.word) {
-                        selectedWord = fallback.word.toLowerCase();
-                        currentThemeName = (fallback.theme_display != null && fallback.theme_display !== '') ? fallback.theme_display : ((fallback.theme != null && fallback.theme !== '') ? fallback.theme : 'Vocabulary');
-                        gameStartTime = Date.now();
-                        correctLetters = [];
-                        wrongLetters = [];
-                        if (messageDiv) messageDiv.textContent = '';
+                        applyWordData({ ...fallback, word: { value: fallback.word, display_term: fallback.display_term, pronunciation_text: fallback.pronunciation_text } });
                         callback();
                     } else {
                             alert('Failed to load word from server!');
@@ -179,10 +204,10 @@ function updateDisplay() {
     if (themeHintEl) {
         themeHintEl.textContent = currentThemeName ? 'Theme: ' + currentThemeName : '';
     }
-    wordDiv.textContent = selectedWord
-        .split('')
-        .map(letter => (correctLetters.includes(letter) ? letter : '_'))
-        .join(' ');
+    const masked = window.HangmanLogic
+        ? window.HangmanLogic.maskHangmanDisplay(displayTerm || selectedWord, correctLetters)
+        : selectedWord.split('').map(letter => (correctLetters.includes(letter) ? letter : '_'));
+    wordDiv.textContent = masked.join(' ');
 
     if (wrongLetters.length > 0) {
         wrongDiv.textContent = 'Wrong: ' + wrongLetters.join(' ');
@@ -236,40 +261,33 @@ function submitGameResult(won) {
         .catch(function () { return { score: null, accuracy: null }; });
 }
 
+function completeGame(won) {
+    if (gameCompleted) return true;
+    gameCompleted = true;
+    submitGameResult(won).then(function (result) {
+        let msg = won ? 'You Win!' : 'Game Over\nThe word was: ' + displayTerm;
+        if (result && result.score != null) {
+            msg += '\nScore: ' + result.score;
+            if (result.accuracy != null) msg += '\nAccuracy: ' + Math.round(result.accuracy * 100) + '%';
+            if (result.rank != null) msg += '\nYour Rank: #' + result.rank;
+            if (result.current_streak_days != null && result.current_streak_days > 0) msg += '\n\uD83D\uDD25 Streak: ' + result.current_streak_days + ' day(s)';
+        }
+        showMessage(msg, won ? '#388e3c' : '#d32f2f');
+        loadLeaderboard(5, 'leaderboard', 'week');
+    });
+    const resultAudio = document.getElementById(won ? 'win-sound' : 'lose-sound');
+    playResultSoundAndPronounce(resultAudio);
+    if (pronounceAgainBtn) pronounceAgainBtn.style.display = 'inline-block';
+    restartBtn.style.display = 'inline-block';
+    return true;
+}
+
 function checkGameStatus() {
-    if (wordDiv.textContent.replace(/ /g, '') === selectedWord) {
-        submitGameResult(true).then(function (result) {
-            let msg = 'You Win!';
-            if (result && result.score != null) {
-                msg += '\nScore: ' + result.score;
-                if (result.accuracy != null) msg += '\nAccuracy: ' + Math.round(result.accuracy * 100) + '%';
-                if (result.rank != null) msg += '\nYour Rank: #' + result.rank;
-                if (result.current_streak_days != null && result.current_streak_days > 0) msg += '\n\uD83D\uDD25 Streak: ' + result.current_streak_days + ' day(s)';
-            }
-            showMessage(msg, '#388e3c');
-            loadLeaderboard(5, 'leaderboard', 'week');
-        });
-        const winAudio = document.getElementById('win-sound');
-        if (winAudio) winAudio.play();
-        restartBtn.style.display = 'inline-block';
-        return true;
+    if (window.HangmanLogic && window.HangmanLogic.isHangmanComplete(selectedWord, correctLetters)) {
+        return completeGame(true);
     }
     if (wrongLetters.length >= maxWrong) {
-        submitGameResult(false).then(function (result) {
-            let msg = 'Game Over\nThe word was: ' + selectedWord;
-            if (result && result.score != null) {
-                msg += '\nScore: ' + result.score;
-                if (result.accuracy != null) msg += '\nAccuracy: ' + Math.round(result.accuracy * 100) + '%';
-                if (result.rank != null) msg += '\nYour Rank: #' + result.rank;
-                if (result.current_streak_days != null && result.current_streak_days > 0) msg += '\n\uD83D\uDD25 Streak: ' + result.current_streak_days + ' day(s)';
-            }
-            showMessage(msg, '#d32f2f');
-            loadLeaderboard(5, 'leaderboard', 'week');
-        });
-        const loseAudio = document.getElementById('lose-sound');
-        if (loseAudio) loseAudio.play();
-        restartBtn.style.display = 'inline-block';
-        return true;
+        return completeGame(false);
     }
     return false;
 }
@@ -518,14 +536,14 @@ document.addEventListener('keydown', (e) => {
             correctLetters.push(letter);
             updateDisplay();
             checkGameStatus();
-            document.getElementById('correct-sound').play();
+            playAudio(document.getElementById('correct-sound'));
         }
     } else {
         if (!wrongLetters.includes(letter)) {
             wrongLetters.push(letter);
             updateDisplay();
             checkGameStatus();
-            document.getElementById('wrong-sound').play();
+            playAudio(document.getElementById('wrong-sound'));
         }
     }
 });
@@ -557,6 +575,7 @@ function loadProgressLeaderboard(period) {
 }
 
 restartBtn.addEventListener('click', () => loadWord(updateDisplay));
+if (pronounceAgainBtn) pronounceAgainBtn.addEventListener('click', pronounceCurrentWord);
 showGameBtn.addEventListener('click', showGameView);
 showProgressBtn.addEventListener('click', showProgressView);
 shareProgressBtn.addEventListener('click', shareProgressCard);

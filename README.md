@@ -72,6 +72,27 @@ Example themes:
 - travel
 - environment
 
+Neurobiology themes are also available:
+
+- `NEURO_FOUNDATIONS` — cellular neuroscience foundations
+- `NEURO_ANATOMY` — neuroanatomy and related anatomy
+- `NEURO_FUNCTION` — sensory and motor neuroscience
+- `NEURO_CLINICAL` — clinical neurobiology and neurological disorders
+
+The master glossary is maintained at `data/source/neurobiology_glossary.csv`.
+Validate it with `python scripts/validate_neurobiology_glossary.py`. Import
+approved rows into a chosen database with:
+
+```bash
+python scripts/import_neurobiology_glossary.py --db-path /path/to/hangman.db
+```
+
+The import is additive and idempotent: it does not delete words or rewrite
+existing games, progress, accounts, or leaderboard rows. Glossary metadata is
+stored in the additive `word_metadata` table while existing word IDs remain
+stable. The four neurobiology themes are mapped deterministically from the
+controlled glossary categories.
+
 ---
 
 ## 🧠 Spaced Repetition Engine
@@ -250,6 +271,19 @@ With the virtual environment active:
 ```bash
 pytest -q
 ```
+
+Refresh the generated offline vocabulary after changing source vocabulary:
+
+```bash
+python scripts/build_vocab_js.py
+```
+
+Neurobiology phrase answers preserve spaces, hyphens, apostrophes, and other
+punctuation as automatically revealed characters; only ASCII letters are
+guessable. After a won or lost game, the browser uses the Web Speech API to
+pronounce the answer and provides a “🔊 Pronounce again” button. Speech requires
+`window.speechSynthesis`; installed voice availability and quality vary by
+operating system and browser.
 
 Or from a fresh shell:
 
