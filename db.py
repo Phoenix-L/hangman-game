@@ -153,7 +153,9 @@ def _migrate_legacy_word_progress(conn: sqlite3.Connection) -> None:
     names = {col[1] for col in columns}
     legacy_columns = {"game_id", "guessed_letter", "was_correct", "guessed_at"}
     if legacy_columns.intersection(names):
-        conn.execute("DROP TABLE IF EXISTS word_progress")
+        # Preserve the legacy rows for manual review; never drop data during
+        # normal startup. The current progress model is created separately.
+        conn.execute("ALTER TABLE word_progress RENAME TO word_progress_legacy")
         conn.execute(
             """
             CREATE TABLE word_progress (
@@ -411,7 +413,7 @@ def seed_words_from_files(db_path: str = DEFAULT_DB_PATH, source_dirs: Iterable[
         conn.close()
 
 
-def clear_themes_and_words(db_path: str = DEFAULT_DB_PATH) -> None:
+def _clear_vocabulary_and_game_history(db_path: str = DEFAULT_DB_PATH) -> None:
     """
     Remove all themes and words and dependent gameplay data so that the
     vocabulary can be reseeded from the current data/*.txt files.
@@ -1081,11 +1083,23 @@ def get_progress_summary(db_path: str, user_id: int) -> dict:
 
 def initialize_and_seed(db_path: str = DEFAULT_DB_PATH, source_dirs: Iterable[str] | None = None) -> int:
     """
-    Initialize schema and reseed vocabulary words from the current data files.
+    Initialize schema and add missing vocabulary from the current data files.
 
-    This clears themes/words and dependent gameplay tables so that legacy
-    word sources (e.g. word/ or data/words/) are removed from the database.
+    This function is safe for application startup and repeated calls. It never
+    clears vocabulary or dependent gameplay data.
     """
     init_db(db_path)
-    clear_themes_and_words(db_path)
+    return seed_words_from_files(db_path=db_path, source_dirs=source_dirs)
+
+
+def reset_and_seed_database(
+    db_path: str = DEFAULT_DB_PATH, source_dirs: Iterable[str] | None = None
+) -> int:
+    """Destructively reset vocabulary and dependent gameplay history.
+
+    This is intentionally separate from normal initialization and must only be
+    called by an explicit development/reset command after a backup.
+    """
+    init_db(db_path)
+    _clear_vocabulary_and_game_history(db_path)
     return seed_words_from_files(db_path=db_path, source_dirs=source_dirs)

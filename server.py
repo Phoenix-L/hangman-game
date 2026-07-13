@@ -33,6 +33,8 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-only-change-me')
 
 DB_PATH = os.environ.get('HANGMAN_DB_PATH', DEFAULT_DB_PATH)
 
+# Startup is intentionally additive and idempotent. Never reset vocabulary or
+# gameplay history while importing the application module.
 initialize_and_seed(DB_PATH)
 
 

@@ -1,13 +1,13 @@
 from pathlib import Path
 
 from db import (
-    clear_themes_and_words,
     create_user,
     create_user_word_progress,
     get_random_word,
     get_theme_name_by_id,
     get_user_word_progress,
     init_db,
+    reset_and_seed_database,
     list_themes,
     seed_words_from_files,
     update_user_word_progress,
@@ -101,9 +101,9 @@ def test_get_random_word_returns_value_and_theme(tmp_path):
     assert result['value'] in ('apple', 'bread')
     assert result['theme'] == 'FOOD'
 
-    # Empty DB returns None
-    clear_themes_and_words(str(db_path))
-    assert get_random_word(str(db_path)) is None
+    # Explicit reset is destructive, then reseeds the requested source.
+    reset_and_seed_database(str(db_path), source_dirs=[str(words_dir)])
+    assert get_random_word(str(db_path))['value'] in ('apple', 'bread')
 
 
 def test_user_word_progress_crud(tmp_path):

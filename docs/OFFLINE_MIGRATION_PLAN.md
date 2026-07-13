@@ -10,7 +10,7 @@ This document is a **design and migration plan only**. No code changes have been
 
 - **Entry:** `server.py` — Flask app with `static_folder='.'`, serves everything from repo root.
 - **Database:** SQLite via `db.py`; default path `hangman.db`. Schema: `users`, `themes`, `words`, `games`, `word_progress`, `leaderboard_entries`.
-- **Startup:** On import, `initialize_and_seed(DB_PATH)` runs: `init_db`, `clear_themes_and_words`, then `seed_words_from_files` from `data/` (top-level `*.txt` only).
+- **Startup:** On import, `initialize_and_seed(DB_PATH)` runs the additive `init_db` and `seed_words_from_files` path. It never clears themes, words, or gameplay history.
 - **Session:** Flask session stores `user_id` for auth; `SECRET_KEY` from env or default dev value.
 
 ### 1.2 API Endpoints Used by the Game
@@ -48,7 +48,7 @@ Engine depends on: DB connection, `words`/`word_progress`/`games` tables.
 ### 1.5 Vocabulary Loading (Current)
 
 - **Source:** `data/*.txt` (e.g. `ket_animals.txt`, `pet_travel.txt`). One word per line, lowercase.
-- **Scripts:** `scripts/init_db.py` calls `initialize_and_seed(DEFAULT_DB_PATH)`; `scripts/seed_words.py` can seed from custom dirs. No existing “export to JS” step.
+- **Scripts:** `scripts/init_db.py` calls the safe additive initializer by default; its destructive reset requires explicit confirmation. `scripts/seed_words.py` can seed from custom dirs. No existing “export to JS” step.
 
 ### 1.6 Frontend Gameplay Logic
 
