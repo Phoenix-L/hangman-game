@@ -12,6 +12,7 @@ from scripts.import_weekly_package import (
     import_package,
     validate_package,
 )
+from scripts.import_neurobiology_glossary import import_glossary
 
 
 def package(items=None):
@@ -30,7 +31,7 @@ def package(items=None):
                 "definition": "a junction",
                 "part_of_speech": "noun",
                 "category": "NEURO_FOUNDATIONS",
-                "aliases": [],
+                "aliases": ["synapse"],
                 "source_days": [1],
             }
         ],
@@ -56,6 +57,28 @@ def test_schema_and_checksum_validation(tmp_path):
         validate_package(value)
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("week_number", True),
+        ("week_number", 14),
+        ("source_days", []),
+        ("source_days", [True]),
+        ("source_days", [84, 85]),
+        ("aliases", ["", "alias"]),
+        ("aliases", ["same", "SAME"]),
+    ],
+)
+def test_strict_week_days_alias_and_identity_validation(field, value):
+    value_package = package()
+    value_package["items"][0][field] = value
+    value_package["payload_sha256"] = checksum(
+        {k: v for k, v in value_package.items() if k != "payload_sha256"}
+    )
+    with pytest.raises(PackageError):
+        validate_package(value_package)
+
+
 def test_dry_run_and_confirmation_gate_do_not_write(tmp_path):
     db = tmp_path / "hangman.db"
     init_db(str(db))
@@ -73,8 +96,21 @@ def test_first_import_identical_second_import_preserves_word_id(tmp_path):
     path = write_package(tmp_path, package())
     first = import_package(path, str(db), confirm=True)
     second = import_package(path, str(db), confirm=True)
-    assert first["inserted"] == 1 and second["unchanged"] == 1
+    assert first["inserted"] == 1 and second["receipt"] == first["receipt"]
     assert first["mappings"] == second["mappings"]
+
+
+def test_same_package_id_different_checksum_fails_closed(tmp_path):
+    db = tmp_path / "hangman.db"
+    path = write_package(tmp_path, package())
+    import_package(path, str(db), confirm=True)
+    conflict = package()
+    conflict["items"][0]["definition"] = "changed"
+    conflict["payload_sha256"] = checksum(
+        {k: v for k, v in conflict.items() if k != "payload_sha256"}
+    )
+    with pytest.raises(PackageError):
+        import_package(write_package(tmp_path, conflict), str(db), confirm=True)
 
 
 def test_identity_conflict_and_malformed_multi_item_roll_back(tmp_path):
@@ -120,4 +156,40 @@ def test_metadata_and_game_tables_are_preserved(tmp_path):
         assert connection.execute("SELECT COUNT(*) FROM users").fetchone()[0] == before
         assert (
             connection.execute("SELECT COUNT(*) FROM word_metadata").fetchone()[0] == 1
+        )
+
+
+def test_shared_cross_repository_fixture_preserves_glossary_identity_and_replay(
+    tmp_path,
+):
+    db = tmp_path / "fixture.db"
+    import_glossary(
+        str(db), Path(__file__).parents[1] / "data/source/neurobiology_glossary.csv"
+    )
+    fixture = Path(__file__).parent / "fixtures/hangman-weekly-v1-cross-repo.json"
+    with get_connection(str(db)) as connection:
+        axon_before = connection.execute(
+            "SELECT w.id, wm.source_term_id FROM words w JOIN word_metadata wm ON wm.word_id=w.id WHERE w.value='axon'"
+        ).fetchone()
+    first = import_package(fixture, str(db), confirm=True)
+    second = import_package(fixture, str(db), confirm=True)
+    assert first["inserted"] == 1 and first["unchanged"] == 1
+    assert first["receipt"] == second["receipt"]
+    assert first["mappings"] == second["mappings"]
+    with get_connection(str(db)) as connection:
+        axon_after = connection.execute(
+            "SELECT w.id, wm.source_term_id FROM words w JOIN word_metadata wm ON wm.word_id=w.id WHERE w.value='axon'"
+        ).fetchone()
+        assert tuple(axon_after) == tuple(axon_before)
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM external_vocabulary_source_mappings"
+            ).fetchone()[0]
+            == 2
+        )
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM vocabulary_package_import_audit"
+            ).fetchone()[0]
+            == 1
         )

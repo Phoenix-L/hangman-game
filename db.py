@@ -129,6 +129,31 @@ CREATE TABLE IF NOT EXISTS word_metadata (
 
 CREATE INDEX IF NOT EXISTS idx_word_metadata_source_term_id
 ON word_metadata(source_term_id);
+
+CREATE TABLE IF NOT EXISTS external_vocabulary_source_mappings (
+    source_term_id TEXT PRIMARY KEY,
+    word_id INTEGER NOT NULL,
+    package_id TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    source_format TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_external_vocabulary_word ON external_vocabulary_source_mappings(word_id);
+
+CREATE TABLE IF NOT EXISTS vocabulary_package_import_audit (
+    package_id TEXT PRIMARY KEY,
+    payload_sha256 TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    receipt_sha256 TEXT NOT NULL,
+    status TEXT NOT NULL,
+    inserted_count INTEGER NOT NULL,
+    updated_count INTEGER NOT NULL,
+    unchanged_count INTEGER NOT NULL,
+    imported_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
