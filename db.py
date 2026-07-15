@@ -447,6 +447,8 @@ def _clear_vocabulary_and_game_history(db_path: str = DEFAULT_DB_PATH) -> None:
     try:
         # Dependent tables first because of foreign keys.
         conn.execute("DELETE FROM word_progress")
+        conn.execute("DELETE FROM external_vocabulary_source_mappings")
+        conn.execute("DELETE FROM vocabulary_package_import_audit")
         conn.execute("DELETE FROM leaderboard_entries")
         conn.execute("DELETE FROM games")
         conn.execute("DELETE FROM words")

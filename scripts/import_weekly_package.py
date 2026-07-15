@@ -72,6 +72,10 @@ def normalize_term(value: str) -> str:
     return " ".join(value.strip().casefold().split())
 
 
+def stable_source_term_id(program_slug: str, normalized_term: str) -> str:
+    return f"learning:{program_slug}:term:{hashlib.sha256(normalized_term.encode('utf-8')).hexdigest()[:24]}"
+
+
 def week_bounds(week_number: int) -> tuple[int, int]:
     start = (week_number - 1) * 7 + 1
     return start, min(week_number * 7, 90)
@@ -149,6 +153,12 @@ def validate_package(package: Any) -> None:
         if not SOURCE_ID_RE.fullmatch(item["source_term_id"]):
             raise PackageError("Package source identity is invalid.")
         normalized = normalize_term(item["canonical_term"])
+        if item["source_term_id"] != stable_source_term_id(
+            package["program_slug"], normalized
+        ):
+            raise PackageError(
+                "Package source identity does not match its canonical term."
+            )
         if not playable_term(normalized):
             raise PackageError("Package contains an unplayable term.")
         if item["source_term_id"] in seen_ids or normalized in seen_terms:
@@ -191,6 +201,34 @@ def _external_for_source(conn, source_term_id: str):
         "SELECT * FROM external_vocabulary_source_mappings WHERE source_term_id=?",
         (source_term_id,),
     ).fetchone()
+
+
+def _verify_stored_receipt(
+    conn, package: dict[str, Any], receipt: dict[str, Any]
+) -> None:
+    expected = {item["source_term_id"]: item["category"] for item in package["items"]}
+    mappings = receipt.get("mappings")
+    if (
+        not isinstance(mappings, list)
+        or len(mappings) != len(expected)
+        or {mapping.get("source_term_id") for mapping in mappings} != set(expected)
+    ):
+        raise PackageError("Stored package audit mappings are incomplete.")
+    for mapping in mappings:
+        source_id = mapping.get("source_term_id")
+        durable = conn.execute(
+            "SELECT m.word_id, w.id, t.name AS category FROM external_vocabulary_source_mappings m JOIN words w ON w.id=m.word_id JOIN themes t ON t.id=w.theme_id WHERE m.source_term_id=?",
+            (source_id,),
+        ).fetchone()
+        if (
+            durable is None
+            or int(durable["word_id"]) != int(mapping.get("word_id", -1))
+            or durable["category"] != expected.get(source_id)
+            or mapping.get("category") != expected.get(source_id)
+        ):
+            raise PackageError(
+                "Stored package audit disagrees with durable vocabulary mappings."
+            )
 
 
 def _plan(
@@ -303,6 +341,7 @@ def import_package(
                     "A different package checksum already uses this package identifier."
                 )
             receipt = json.loads(audit["receipt_json"])
+            _verify_stored_receipt(conn, package, receipt)
             if receipt_path:
                 receipt_path.write_text(canonical_json(receipt), encoding="utf-8")
             return {

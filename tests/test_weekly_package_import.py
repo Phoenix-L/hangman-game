@@ -5,11 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from db import get_connection, init_db
+from db import get_connection, init_db, reset_and_seed_database
 from scripts.import_weekly_package import (
     PackageError,
     checksum,
     import_package,
+    stable_source_term_id,
     validate_package,
 )
 from scripts.import_neurobiology_glossary import import_glossary
@@ -24,7 +25,7 @@ def package(items=None):
         "items": items
         or [
             {
-                "source_term_id": "learning:neuroscience-90:term:" + "a" * 24,
+                "source_term_id": stable_source_term_id("neuroscience-90", "synapse"),
                 "canonical_term": "synapse",
                 "display_term": "Synapse",
                 "pronunciation_text": "synapse",
@@ -53,6 +54,24 @@ def test_schema_and_checksum_validation(tmp_path):
     value = package()
     validate_package(value)
     value["payload_sha256"] = "0" * 64
+    with pytest.raises(PackageError):
+        validate_package(value)
+
+
+@pytest.mark.parametrize("mutation", ["wrong_hash", "wrong_program", "wrong_term"])
+def test_source_identity_formula_is_enforced(mutation):
+    value = package()
+    if mutation == "wrong_hash":
+        value["items"][0]["source_term_id"] = (
+            "learning:neuroscience-90:term:" + "0" * 24
+        )
+    elif mutation == "wrong_program":
+        value["program_slug"] = "other-program"
+    else:
+        value["items"][0]["canonical_term"] = "other term"
+    value["payload_sha256"] = checksum(
+        {k: v for k, v in value.items() if k != "payload_sha256"}
+    )
     with pytest.raises(PackageError):
         validate_package(value)
 
@@ -111,6 +130,23 @@ def test_same_package_id_different_checksum_fails_closed(tmp_path):
     )
     with pytest.raises(PackageError):
         import_package(write_package(tmp_path, conflict), str(db), confirm=True)
+
+
+def test_explicit_destructive_reset_clears_package_audit(tmp_path):
+    db = tmp_path / "hangman.db"
+    path = write_package(tmp_path, package())
+    import_package(path, str(db), confirm=True)
+    words = tmp_path / "words"
+    words.mkdir()
+    (words / "reset.txt").write_text("fresh\n", encoding="utf-8")
+    reset_and_seed_database(str(db), source_dirs=[str(words)])
+    with get_connection(str(db)) as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM vocabulary_package_import_audit"
+            ).fetchone()[0]
+            == 0
+        )
 
 
 def test_identity_conflict_and_malformed_multi_item_roll_back(tmp_path):
@@ -193,3 +229,10 @@ def test_shared_cross_repository_fixture_preserves_glossary_identity_and_replay(
             ).fetchone()[0]
             == 1
         )
+        connection.execute(
+            "DELETE FROM external_vocabulary_source_mappings WHERE source_term_id=?",
+            (first["mappings"][0]["source_term_id"],),
+        )
+        connection.commit()
+    with pytest.raises(PackageError):
+        import_package(fixture, str(db), confirm=True)
