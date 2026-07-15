@@ -60,6 +60,20 @@ Example gameplay features:
 
 ## 📚 Vocabulary Learning
 
+Weekly packages from Phoenix-L/learning can be validated and imported without
+opening the learning database:
+
+```bash
+python scripts/import_weekly_package.py package.json --db-path /path/to/hangman.db --dry-run
+python scripts/import_weekly_package.py package.json --db-path /path/to/hangman.db --confirm --receipt-output receipt.json
+```
+
+The first command performs zero writes. The second requires explicit
+confirmation, is transactional and idempotent, and emits a receipt for the
+learning application. Regenerate `vocab.js` separately with
+`python scripts/build_vocab_js.py`; the importer never rewrites offline
+vocabulary files.
+
 - Theme-based vocabulary datasets
 - Word learning progress tracking
 - Difficulty evolution

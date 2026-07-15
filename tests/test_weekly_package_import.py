@@ -1,0 +1,238 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from db import get_connection, init_db, reset_and_seed_database
+from scripts.import_weekly_package import (
+    PackageError,
+    checksum,
+    import_package,
+    stable_source_term_id,
+    validate_package,
+)
+from scripts.import_neurobiology_glossary import import_glossary
+
+
+def package(items=None):
+    value = {
+        "format": "hangman-weekly-v1",
+        "package_id": "hangman-weekly-v1:neuroscience-90:week-1",
+        "program_slug": "neuroscience-90",
+        "week_number": 1,
+        "items": items
+        or [
+            {
+                "source_term_id": stable_source_term_id("neuroscience-90", "synapse"),
+                "canonical_term": "synapse",
+                "display_term": "Synapse",
+                "pronunciation_text": "synapse",
+                "definition": "a junction",
+                "part_of_speech": "noun",
+                "category": "NEURO_FOUNDATIONS",
+                "aliases": ["synapse"],
+                "source_days": [1],
+            }
+        ],
+    }
+    value["payload_sha256"] = checksum(value)
+    return value
+
+
+def write_package(tmp_path: Path, value: dict) -> Path:
+    path = tmp_path / "package.json"
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_schema_and_checksum_validation(tmp_path):
+    value = package()
+    validate_package(value)
+    value["payload_sha256"] = "0" * 64
+    with pytest.raises(PackageError):
+        validate_package(value)
+
+
+@pytest.mark.parametrize("mutation", ["wrong_hash", "wrong_program", "wrong_term"])
+def test_source_identity_formula_is_enforced(mutation):
+    value = package()
+    if mutation == "wrong_hash":
+        value["items"][0]["source_term_id"] = (
+            "learning:neuroscience-90:term:" + "0" * 24
+        )
+    elif mutation == "wrong_program":
+        value["program_slug"] = "other-program"
+    else:
+        value["items"][0]["canonical_term"] = "other term"
+    value["payload_sha256"] = checksum(
+        {k: v for k, v in value.items() if k != "payload_sha256"}
+    )
+    with pytest.raises(PackageError):
+        validate_package(value)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("week_number", True),
+        ("week_number", 14),
+        ("source_days", []),
+        ("source_days", [True]),
+        ("source_days", [84, 85]),
+        ("aliases", ["", "alias"]),
+        ("aliases", ["same", "SAME"]),
+    ],
+)
+def test_strict_week_days_alias_and_identity_validation(field, value):
+    value_package = package()
+    value_package["items"][0][field] = value
+    value_package["payload_sha256"] = checksum(
+        {k: v for k, v in value_package.items() if k != "payload_sha256"}
+    )
+    with pytest.raises(PackageError):
+        validate_package(value_package)
+
+
+def test_dry_run_and_confirmation_gate_do_not_write(tmp_path):
+    db = tmp_path / "hangman.db"
+    init_db(str(db))
+    path = write_package(tmp_path, package())
+    result = import_package(path, str(db), dry_run=True)
+    assert result["inserted"] == 1
+    with get_connection(str(db)) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM words").fetchone()[0] == 0
+    with pytest.raises(PackageError):
+        import_package(path, str(db), confirm=False)
+
+
+def test_first_import_identical_second_import_preserves_word_id(tmp_path):
+    db = tmp_path / "hangman.db"
+    path = write_package(tmp_path, package())
+    first = import_package(path, str(db), confirm=True)
+    second = import_package(path, str(db), confirm=True)
+    assert first["inserted"] == 1 and second["receipt"] == first["receipt"]
+    assert first["mappings"] == second["mappings"]
+
+
+def test_same_package_id_different_checksum_fails_closed(tmp_path):
+    db = tmp_path / "hangman.db"
+    path = write_package(tmp_path, package())
+    import_package(path, str(db), confirm=True)
+    conflict = package()
+    conflict["items"][0]["definition"] = "changed"
+    conflict["payload_sha256"] = checksum(
+        {k: v for k, v in conflict.items() if k != "payload_sha256"}
+    )
+    with pytest.raises(PackageError):
+        import_package(write_package(tmp_path, conflict), str(db), confirm=True)
+
+
+def test_explicit_destructive_reset_clears_package_audit(tmp_path):
+    db = tmp_path / "hangman.db"
+    path = write_package(tmp_path, package())
+    import_package(path, str(db), confirm=True)
+    words = tmp_path / "words"
+    words.mkdir()
+    (words / "reset.txt").write_text("fresh\n", encoding="utf-8")
+    reset_and_seed_database(str(db), source_dirs=[str(words)])
+    with get_connection(str(db)) as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM vocabulary_package_import_audit"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_identity_conflict_and_malformed_multi_item_roll_back(tmp_path):
+    db = tmp_path / "hangman.db"
+    path = write_package(tmp_path, package())
+    import_package(path, str(db), confirm=True)
+    conflict = package()
+    conflict["items"][0]["canonical_term"] = "different"
+    conflict["payload_sha256"] = checksum(
+        {k: v for k, v in conflict.items() if k != "payload_sha256"}
+    )
+    with pytest.raises(PackageError):
+        import_package(write_package(tmp_path, conflict), str(db), confirm=True)
+    malformed_items = [
+        package()["items"][0],
+        {
+            **package()["items"][0],
+            "source_term_id": "learning:neuroscience-90:term:" + "b" * 24,
+            "canonical_term": "two",
+        },
+    ]
+    malformed = package(malformed_items)
+    malformed["items"][1]["category"] = "NOT_ALLOWED"
+    malformed["payload_sha256"] = checksum(
+        {k: v for k, v in malformed.items() if k != "payload_sha256"}
+    )
+    with pytest.raises(PackageError):
+        import_package(write_package(tmp_path, malformed), str(db), confirm=True)
+    with get_connection(str(db)) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM words").fetchone()[0] == 1
+
+
+def test_metadata_and_game_tables_are_preserved(tmp_path):
+    db = tmp_path / "hangman.db"
+    init_db(str(db))
+    with get_connection(str(db)) as connection:
+        connection.execute("INSERT INTO users (username) VALUES ('existing')")
+        connection.commit()
+    before = get_connection(str(db)).execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    path = write_package(tmp_path, package())
+    import_package(path, str(db), confirm=True)
+    with get_connection(str(db)) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM users").fetchone()[0] == before
+        assert (
+            connection.execute("SELECT COUNT(*) FROM word_metadata").fetchone()[0] == 1
+        )
+
+
+def test_shared_cross_repository_fixture_preserves_glossary_identity_and_replay(
+    tmp_path,
+):
+    db = tmp_path / "fixture.db"
+    import_glossary(
+        str(db), Path(__file__).parents[1] / "data/source/neurobiology_glossary.csv"
+    )
+    fixture = Path(__file__).parent / "fixtures/hangman-weekly-v1-cross-repo.json"
+    with get_connection(str(db)) as connection:
+        axon_before = connection.execute(
+            "SELECT w.id, wm.source_term_id FROM words w JOIN word_metadata wm ON wm.word_id=w.id WHERE w.value='axon'"
+        ).fetchone()
+    first = import_package(fixture, str(db), confirm=True)
+    second = import_package(fixture, str(db), confirm=True)
+    assert first["inserted"] == 1 and first["unchanged"] == 1
+    assert first["receipt"] == second["receipt"]
+    assert first["mappings"] == second["mappings"]
+    with get_connection(str(db)) as connection:
+        axon_after = connection.execute(
+            "SELECT w.id, wm.source_term_id FROM words w JOIN word_metadata wm ON wm.word_id=w.id WHERE w.value='axon'"
+        ).fetchone()
+        assert tuple(axon_after) == tuple(axon_before)
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM external_vocabulary_source_mappings"
+            ).fetchone()[0]
+            == 2
+        )
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM vocabulary_package_import_audit"
+            ).fetchone()[0]
+            == 1
+        )
+        connection.execute(
+            "DELETE FROM external_vocabulary_source_mappings WHERE source_term_id=?",
+            (first["mappings"][0]["source_term_id"],),
+        )
+        connection.commit()
+    with pytest.raises(PackageError):
+        import_package(fixture, str(db), confirm=True)
