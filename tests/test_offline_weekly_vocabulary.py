@@ -7,6 +7,7 @@ from scripts.build_vocab_js import (
     add_neurobiology_vocab,
     add_weekly_package_vocab,
     build_vocab_and_themes,
+    build_vocab,
     emit_js,
 )
 from scripts.import_weekly_package import checksum, normalize_term, stable_source_term_id
@@ -87,7 +88,32 @@ def test_repeated_identical_source_identity_is_idempotent(tmp_path):
 
     assert vocab["NEURO_ANATOMY"].count("test offline term") == 1
     assert summary["added"] == 1
-    assert summary["deduplicated"] == 1
+    assert summary["deduplicated"] == 0
+
+
+def test_repeated_identical_package_id_and_checksum_is_idempotent(tmp_path):
+    package = make_package()
+    write_package(tmp_path, package, "a.json")
+    write_package(tmp_path, package, "b.json")
+    vocab, themes = vocab_with_glossary()
+
+    summary = add_weekly_package_vocab(vocab, themes, tmp_path)
+
+    assert summary == {"packages": 1, "items": 1, "deduplicated": 0, "added": 1}
+
+
+def test_same_package_id_with_different_valid_checksum_fails_before_output(tmp_path):
+    first = make_package("first published term")
+    second = make_package("second published term", package_id=first["package_id"])
+    write_package(tmp_path, first, "a.json")
+    write_package(tmp_path, second, "b.json")
+    output = tmp_path / "vocab.js"
+    output.write_bytes(b"existing output")
+
+    with pytest.raises(ValueError, match="conflicting payload checksums"):
+        build_vocab(ROOT / "data", tmp_path)
+
+    assert output.read_bytes() == b"existing output"
 
 
 def test_invalid_package_checksum_fails_closed(tmp_path):
@@ -130,6 +156,12 @@ def test_same_term_in_different_category_fails_closed(tmp_path):
 def test_same_source_identity_with_conflicting_category_fails_closed(tmp_path):
     first = make_package("shared offline term", "NEURO_ANATOMY")
     second = make_package("shared offline term", "NEURO_FUNCTION")
+    second["package_id"] = "hangman-weekly-v1:neuroscience-90:week-2"
+    second["week_number"] = 2
+    second["items"][0]["source_days"] = [8]
+    second["payload_sha256"] = checksum(
+        {key: value for key, value in second.items() if key != "payload_sha256"}
+    )
     write_package(tmp_path, first, "a.json")
     write_package(tmp_path, second, "b.json")
     vocab, themes = vocab_with_glossary()
@@ -169,3 +201,13 @@ def test_existing_vocab_is_preserved_and_generation_is_deterministic(tmp_path):
 
     assert all(first[category][: len(values)] == values for category, values in before_copy.items())
     assert first_output.read_bytes() == second_output.read_bytes()
+
+
+def test_fresh_default_build_matches_committed_vocab_js(tmp_path):
+    vocab, themes, summary = build_vocab()
+    output = tmp_path / "vocab.js"
+    emit_js(vocab, themes, output)
+
+    assert summary == {"packages": 1, "items": 54, "deduplicated": 5, "added": 49}
+    assert sum(len(values) for values in vocab.values()) == 1501
+    assert output.read_bytes() == (ROOT / "vocab.js").read_bytes()

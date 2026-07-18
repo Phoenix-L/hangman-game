@@ -117,6 +117,8 @@ def add_weekly_package_vocab(
             term_categories.setdefault(term, set()).add(category)
     source_identities: dict[str, tuple[str, str]] = {}
     summary = {"packages": 0, "items": 0, "deduplicated": 0, "added": 0}
+    package_checksums: dict[str, str] = {}
+    validated_packages = []
 
     for package_path in collect_weekly_packages(package_dir):
         try:
@@ -125,6 +127,19 @@ def add_weekly_package_vocab(
             raise ValueError(
                 f"Invalid weekly package {package_path.name}: {exc}"
             ) from exc
+        package_id = package["package_id"]
+        payload_sha256 = package["payload_sha256"]
+        previous_checksum = package_checksums.get(package_id)
+        if previous_checksum is not None and previous_checksum != payload_sha256:
+            raise ValueError(
+                "Weekly package identity has conflicting payload checksums."
+            )
+        if previous_checksum == payload_sha256:
+            continue
+        package_checksums[package_id] = payload_sha256
+        validated_packages.append(package)
+
+    for package in validated_packages:
         summary["packages"] += 1
         for item in sorted(
             package["items"],
@@ -172,6 +187,17 @@ def add_weekly_package_vocab(
     return summary
 
 
+def build_vocab(
+    data_dir: Path = DEFAULT_DATA_DIR,
+    package_dir: Path = DEFAULT_WEEKLY_PACKAGE_DIR,
+) -> tuple[dict[str, list[str]], list[dict], dict[str, int]]:
+    """Build vocabulary in memory, failing before any output is written."""
+    vocab, themes = build_vocab_and_themes(data_dir)
+    add_neurobiology_vocab(vocab, themes)
+    weekly_summary = add_weekly_package_vocab(vocab, themes, package_dir)
+    return vocab, themes, weekly_summary
+
+
 def emit_js(vocab: dict, themes: list[dict], out_path: Path) -> None:
     """Write vocab.js with VOCAB and THEMES."""
     vocab_json = json.dumps(vocab, ensure_ascii=False)
@@ -191,9 +217,7 @@ def main() -> int:
         print(f"Error: data directory not found: {data_dir}", file=sys.stderr)
         return 1
 
-    vocab, themes = build_vocab_and_themes(data_dir)
-    add_neurobiology_vocab(vocab, themes)
-    weekly_summary = add_weekly_package_vocab(vocab, themes)
+    vocab, themes, weekly_summary = build_vocab(data_dir)
     if not vocab:
         print("Warning: no vocabulary files found.", file=sys.stderr)
 
