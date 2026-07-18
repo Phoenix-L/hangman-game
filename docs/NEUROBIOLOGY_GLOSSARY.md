@@ -41,8 +41,18 @@ creating the current additive table; it does not drop the legacy rows.
 
 Run `python scripts/validate_neurobiology_glossary.py` before importing and
 `python scripts/import_neurobiology_glossary.py --db-path PATH` to import. The
-existing `scripts/build_vocab_js.py` includes approved glossary answers in the
-generated offline `vocab.js` using the same four theme keys.
+existing `scripts/build_vocab_js.py` includes approved glossary answers and
+validated immutable published weekly packages in the generated offline
+`vocab.js` using the same four theme keys. Weekly package files are stored
+under `data/source/weekly_packages/`; their checksums and item contracts are
+verified without opening SQLite. Exact terms already present in the same
+category are deduplicated, while category or source-identity conflicts fail
+closed.
+
+Online package import updates SQLite but intentionally does not rewrite
+offline assets. The committed Week 1 package has 54 items, 5 same-category
+deduplications, and 49 net additions, producing 1501 offline words to match
+the published online vocabulary.
 
 Only ASCII letters are guessable in glossary answers. Spaces and punctuation
 are revealed automatically, and the original display term is used for the

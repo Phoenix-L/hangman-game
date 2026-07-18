@@ -13,11 +13,18 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts.import_weekly_package import (
+    ALLOWED_CATEGORIES,
+    PackageError,
+    load_package,
+    normalize_term,
+)
 from scripts.validate_neurobiology_glossary import DEFAULT_PATH, THEME_BY_CATEGORY, validate
 
 
 DEFAULT_DATA_DIR = ROOT / "data"
 DEFAULT_OUTPUT = ROOT / "vocab.js"
+DEFAULT_WEEKLY_PACKAGE_DIR = ROOT / "data/source/weekly_packages"
 
 
 def theme_display_name(theme_name: str) -> str:
@@ -86,6 +93,85 @@ def add_neurobiology_vocab(
         theme_by_id[theme_key]["word_count"] = len(values)
 
 
+def collect_weekly_packages(package_dir: Path = DEFAULT_WEEKLY_PACKAGE_DIR) -> list[Path]:
+    """Return repository-owned published packages in deterministic order."""
+    if not package_dir.exists():
+        return []
+    return sorted(package_dir.rglob("*.json"))
+
+
+def add_weekly_package_vocab(
+    vocab: dict[str, list[str]],
+    themes: list[dict],
+    package_dir: Path = DEFAULT_WEEKLY_PACKAGE_DIR,
+) -> dict[str, int]:
+    """Validate and merge immutable published weekly packages into offline vocab."""
+    theme_by_id = {theme["id"]: theme for theme in themes}
+    terms_by_category = {
+        category: {normalize_term(term) for term in terms}
+        for category, terms in vocab.items()
+    }
+    term_categories: dict[str, set[str]] = {}
+    for category, terms in terms_by_category.items():
+        for term in terms:
+            term_categories.setdefault(term, set()).add(category)
+    source_identities: dict[str, tuple[str, str]] = {}
+    summary = {"packages": 0, "items": 0, "deduplicated": 0, "added": 0}
+
+    for package_path in collect_weekly_packages(package_dir):
+        try:
+            package = load_package(package_path)
+        except PackageError as exc:
+            raise ValueError(
+                f"Invalid weekly package {package_path.name}: {exc}"
+            ) from exc
+        summary["packages"] += 1
+        for item in sorted(
+            package["items"],
+            key=lambda value: (
+                value["source_term_id"],
+                normalize_term(value["canonical_term"]),
+            ),
+        ):
+            summary["items"] += 1
+            category = item["category"]
+            normalized = normalize_term(item["canonical_term"])
+            if category not in ALLOWED_CATEGORIES:
+                raise ValueError("Weekly package contains an unsupported category.")
+            identity = item["source_term_id"]
+            previous = source_identities.get(identity)
+            current = (normalized, category)
+            if previous is not None and previous != current:
+                raise ValueError(
+                    "Weekly package reuses a source identity with conflicting term/category."
+                )
+            source_identities[identity] = current
+
+            prior_categories = term_categories.get(normalized, set())
+            if prior_categories and prior_categories != {category}:
+                raise ValueError("Weekly package term conflicts with another category.")
+            values = vocab.setdefault(category, [])
+            category_terms = terms_by_category.setdefault(category, set())
+            if normalized in category_terms:
+                summary["deduplicated"] += 1
+                continue
+            values.append(normalized)
+            category_terms.add(normalized)
+            term_categories.setdefault(normalized, set()).add(category)
+            summary["added"] += 1
+            if category not in theme_by_id:
+                theme = {
+                    "id": category,
+                    "name": category,
+                    "display": theme_display_name(category),
+                    "word_count": 0,
+                }
+                themes.append(theme)
+                theme_by_id[category] = theme
+            theme_by_id[category]["word_count"] = len(values)
+    return summary
+
+
 def emit_js(vocab: dict, themes: list[dict], out_path: Path) -> None:
     """Write vocab.js with VOCAB and THEMES."""
     vocab_json = json.dumps(vocab, ensure_ascii=False)
@@ -107,11 +193,17 @@ def main() -> int:
 
     vocab, themes = build_vocab_and_themes(data_dir)
     add_neurobiology_vocab(vocab, themes)
+    weekly_summary = add_weekly_package_vocab(vocab, themes)
     if not vocab:
         print("Warning: no vocabulary files found.", file=sys.stderr)
 
     emit_js(vocab, themes, out_path)
     print(f"Wrote {out_path} ({len(themes)} themes, {sum(len(w) for w in vocab.values())} words).")
+    print(
+        "Weekly packages: "
+        f"{weekly_summary['packages']} files, {weekly_summary['items']} items, "
+        f"{weekly_summary['deduplicated']} deduplicated, {weekly_summary['added']} added."
+    )
     return 0
 
 

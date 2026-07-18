@@ -70,9 +70,20 @@ python scripts/import_weekly_package.py package.json --db-path /path/to/hangman.
 
 The first command performs zero writes. The second requires explicit
 confirmation, is transactional and idempotent, and emits a receipt for the
-learning application. Regenerate `vocab.js` separately with
-`python scripts/build_vocab_js.py`; the importer never rewrites offline
-vocabulary files.
+learning application. The importer never rewrites offline vocabulary files.
+Instead, immutable published packages committed under
+`data/source/weekly_packages/` are reproducible inputs to
+`python scripts/build_vocab_js.py`. The builder validates each package
+checksum and contract, merges canonical terms into their declared category,
+deduplicates exact same-category terms, and fails closed on conflicts. This
+keeps online SQLite imports and offline assets separate while allowing both to
+contain the same published vocabulary.
+
+The committed neuroscience-90 Week 1 package contains 54 published items.
+Five terms are already represented by the glossary vocabulary, so the
+reproducible offline build adds 49 terms and produces 1501 words, matching the
+online published vocabulary. Package source files are immutable inputs; do not
+edit them by hand.
 
 - Theme-based vocabulary datasets
 - Word learning progress tracking
@@ -301,11 +312,16 @@ With the virtual environment active:
 pytest -q
 ```
 
-Refresh the generated offline vocabulary after changing source vocabulary:
+Refresh the generated offline vocabulary after changing version-controlled
+source vocabulary or adding an immutable published package:
 
 ```bash
 python scripts/build_vocab_js.py
 ```
+
+The build does not query SQLite or production paths. Run the online importer
+separately when a package should update a database, then regenerate offline
+assets from the committed package artifact.
 
 Neurobiology phrase answers preserve spaces, hyphens, apostrophes, and other
 punctuation as automatically revealed characters; only ASCII letters are
