@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { isHangmanComplete, maskHangmanDisplay, guessableLetters } = require('../game_logic.js');
+const { isHangmanComplete, maskHangmanDisplay, guessableLetters, formatHangmanDisplay } = require('../game_logic.js');
 const { createPronunciationController } = require('../speech_controller.js');
 
 function speechFixture() {
@@ -33,6 +33,11 @@ test('phrase completion ignores spaces and punctuation', () => {
   assert.deepEqual(guessableLetters("cerebral cortex"), ['c', 'e', 'r', 'b', 'a', 'l', 'o', 't', 'x']);
   assert.equal(isHangmanComplete("cerebral cortex", ['c', 'e', 'r', 'b', 'a', 'l', 'o', 't', 'x']), true);
   assert.equal(isHangmanComplete("cerebral cortex", ['c', 'e']), false);
+});
+
+test('phrase formatting preserves an explicit word boundary', () => {
+  const masked = maskHangmanDisplay('vertebral column', ['v', 'e', 'r', 't', 'b', 'a', 'l', 'c', 'o', 'u', 'm', 'n']);
+  assert.equal(formatHangmanDisplay(masked), 'v e r t e b r a l   c o l u m n');
 });
 
 test('hyphens and apostrophes are automatically visible', () => {

@@ -21,11 +21,16 @@ function maskHangmanDisplay(displayTerm, guessedLetters) {
     });
 }
 
+function formatHangmanDisplay(maskedCharacters) {
+    return (maskedCharacters || []).join(' ');
+}
+
 const HangmanLogic = {
     normalizeHangmanAnswer,
     guessableLetters,
     isHangmanComplete,
     maskHangmanDisplay,
+    formatHangmanDisplay,
 };
 
 if (typeof window !== 'undefined') window.HangmanLogic = HangmanLogic;

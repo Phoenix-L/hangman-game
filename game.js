@@ -207,7 +207,10 @@ function updateDisplay() {
     const masked = window.HangmanLogic
         ? window.HangmanLogic.maskHangmanDisplay(displayTerm || selectedWord, correctLetters)
         : selectedWord.split('').map(letter => (correctLetters.includes(letter) ? letter : '_'));
-    wordDiv.textContent = masked.join(' ');
+    wordDiv.textContent = window.HangmanLogic && typeof window.HangmanLogic.formatHangmanDisplay === 'function'
+        ? window.HangmanLogic.formatHangmanDisplay(masked)
+        : masked.join(' ');
+    wordDiv.setAttribute('aria-label', masked.join('').replace(/\s+/g, ' word break '));
 
     if (wrongLetters.length > 0) {
         wrongDiv.textContent = 'Wrong: ' + wrongLetters.join(' ');
