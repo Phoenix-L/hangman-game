@@ -92,6 +92,8 @@ h2, h3 {
     font-size: 2em;
     letter-spacing: 0.5em;
     margin: 1em 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 #wrong-letters {
