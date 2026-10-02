@@ -3,7 +3,6 @@ from datetime import datetime
 from flask import Flask, jsonify, request, send_from_directory, session, redirect
 from werkzeug.security import check_password_hash, generate_password_hash
 import os
-import secrets
 import sys
 
 from db import (
@@ -30,9 +29,18 @@ from db import (
 from engine.word_selector import select_guest_word, select_next_word, update_word_progress
 
 app = Flask(__name__, static_folder=None)
+_secret_key = os.environ.get('SECRET_KEY')
+if not _secret_key:
+    raise RuntimeError('SECRET_KEY must be configured persistently before startup')
+
+_allow_insecure_cookie = os.environ.get('HANGMAN_ALLOW_INSECURE_COOKIE') == '1'
+_runtime_mode = os.environ.get('HANGMAN_ENV', 'production').lower()
+if _allow_insecure_cookie and _runtime_mode not in {'development', 'lan'}:
+    raise RuntimeError('insecure cookies are allowed only in development or LAN mode')
+
 app.config.update(
-    SECRET_KEY=os.environ.get('SECRET_KEY') or secrets.token_urlsafe(32),
-    SESSION_COOKIE_SECURE=True,
+    SECRET_KEY=_secret_key,
+    SESSION_COOKIE_SECURE=not _allow_insecure_cookie,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
 )
@@ -130,6 +138,7 @@ def serve_admin():
 
 _PUBLIC_FILES = frozenset({
     'index.html', 'style.css', 'game_logic.js', 'speech_controller.js', 'game.js',
+    'vocab.js',
 })
 _PUBLIC_AUDIO = frozenset({'correct.mp3', 'lose.mp3', 'win.mp3', 'wrong.mp3'})
 
