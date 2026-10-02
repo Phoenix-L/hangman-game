@@ -26,6 +26,13 @@ def client_with_seeded_db(tmp_path, monkeypatch):
         yield client, str(db_path)
 
 
+def enable_admin_session_for_test(client):
+    # Production has no public bootstrap route. Set the capability only inside
+    # this isolated Flask test client to exercise the protected handlers.
+    with client.session_transaction() as test_session:
+        test_session['is_admin'] = True
+
+
 def test_admin_themes_requires_admin(client_with_seeded_db):
     client, _ = client_with_seeded_db
 
@@ -33,12 +40,13 @@ def test_admin_themes_requires_admin(client_with_seeded_db):
     assert response.status_code == 403
 
 
-def test_admin_session_endpoint_enables_admin(client_with_seeded_db):
+def test_admin_session_bootstrap_is_not_exposed(client_with_seeded_db):
     client, _ = client_with_seeded_db
 
-    enable_resp = client.post('/api/admin/session')
-    assert enable_resp.status_code == 200
-    assert enable_resp.get_json()['is_admin'] is True
+    assert '/api/admin/session' not in {rule.rule for rule in client.application.url_map.iter_rules()}
+    assert client.post('/api/admin/session').status_code in (404, 405)
+
+    enable_admin_session_for_test(client)
 
     themes_resp = client.get('/api/admin/themes')
     assert themes_resp.status_code == 200
@@ -48,8 +56,7 @@ def test_admin_session_endpoint_enables_admin(client_with_seeded_db):
 def test_admin_theme_select_updates_active_theme(client_with_seeded_db):
     client, db_path = client_with_seeded_db
 
-    enable_resp = client.post('/api/admin/session')
-    assert enable_resp.status_code == 200
+    enable_admin_session_for_test(client)
 
     themes_resp = client.get('/api/admin/themes')
     assert themes_resp.status_code == 200
@@ -74,8 +81,7 @@ def test_admin_theme_select_updates_active_theme(client_with_seeded_db):
 def test_word_next_uses_active_theme(client_with_seeded_db):
     client, _ = client_with_seeded_db
 
-    enable_resp = client.post('/api/admin/session')
-    assert enable_resp.status_code == 200
+    enable_admin_session_for_test(client)
 
     themes_resp = client.get('/api/admin/themes')
     themes = themes_resp.get_json()['themes']
