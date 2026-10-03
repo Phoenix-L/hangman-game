@@ -29,7 +29,21 @@ from db import (
 from engine.word_selector import select_guest_word, select_next_word, update_word_progress
 
 app = Flask(__name__, static_folder=None)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-only-change-me')
+_secret_key = os.environ.get('SECRET_KEY')
+if not _secret_key:
+    raise RuntimeError('SECRET_KEY must be configured persistently before startup')
+
+_allow_insecure_cookie = os.environ.get('HANGMAN_ALLOW_INSECURE_COOKIE') == '1'
+_runtime_mode = os.environ.get('HANGMAN_ENV', 'production').lower()
+if _allow_insecure_cookie and _runtime_mode not in {'development', 'lan'}:
+    raise RuntimeError('insecure cookies are allowed only in development or LAN mode')
+
+app.config.update(
+    SECRET_KEY=_secret_key,
+    SESSION_COOKIE_SECURE=not _allow_insecure_cookie,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+)
 
 DB_PATH = os.environ.get('HANGMAN_DB_PATH', DEFAULT_DB_PATH)
 
@@ -116,33 +130,30 @@ def serve_hangman_index():
     return send_from_directory('.', 'index.html')
 
 @app.route('/admin')
-def serve_admin():
-    return send_from_directory('.', 'admin.html')
-
-
-@app.route('/admin/')
-def serve_admin_slash():
-    return redirect('/admin', code=302)
-
-
 @app.route('/hangman/admin')
-def serve_hangman_admin():
-    return send_from_directory('.', 'admin.html')
-
-
 @app.route('/hangman/admin/')
-def serve_hangman_admin_slash():
-    return redirect('/hangman/admin', code=302)
+def serve_admin():
+    return jsonify({'error': 'Not found'}), 404
+
+
+_PUBLIC_FILES = frozenset({
+    'index.html', 'style.css', 'game_logic.js', 'speech_controller.js', 'game.js',
+    'vocab.js',
+})
+_PUBLIC_AUDIO = frozenset({'correct.mp3', 'lose.mp3', 'win.mp3', 'wrong.mp3'})
 
 
 @app.route('/<path:path>')
 def serve_static(path):
     if path.startswith('hangman/'):
-        stripped = path[len('hangman/'):]
-        if not stripped:
-            return send_from_directory('.', 'index.html')
-        path = stripped
-    return send_from_directory('.', path)
+        path = path[len('hangman/'):]
+    if not path:
+        path = 'index.html'
+    if path in _PUBLIC_FILES:
+        return send_from_directory('.', path)
+    if path.startswith('assets/') and path[len('assets/'):] in _PUBLIC_AUDIO:
+        return send_from_directory('.', path)
+    return jsonify({'error': 'Not found'}), 404
 
 
 @route_with_hangman_prefix('/api/random_word')
@@ -226,15 +237,6 @@ def get_admin_themes():
     if session.get("is_admin") is not True:
         return jsonify({'error': 'Forbidden'}), 403
     return jsonify({'themes': list_themes(DB_PATH)}), 200
-
-
-@route_with_hangman_prefix('/api/admin/session', methods=['POST'])
-def enable_admin_session():
-    """
-    Minimal admin bootstrap for MVP: marks current session as admin.
-    """
-    session['is_admin'] = True
-    return jsonify({'ok': True, 'is_admin': True}), 200
 
 
 @route_with_hangman_prefix('/api/admin/themes/select', methods=['POST'])
@@ -489,4 +491,5 @@ if __name__ == '__main__':
             '(common on Windows, e.g. AirPlay). Retry with: PORT=5001 python server.py\n',
             file=sys.stderr,
         )
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    host = os.environ.get('HOST', '127.0.0.1')
+    app.run(host=host, port=port, debug=debug)
